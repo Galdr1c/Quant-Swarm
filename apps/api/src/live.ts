@@ -2,6 +2,7 @@ import {
   BinanceMarketDataProvider,
   BybitMarketDataProvider,
   HyperliquidMarketDataProvider,
+  TradingViewMarketDataProvider,
   type CandleSubscription,
   type StreamingMarketDataProvider,
 } from "@quant-swarm/market-data";
@@ -13,9 +14,15 @@ declare const process: {
   exitCode?: number;
 };
 
-function parseSubscriptions(raw: string): CandleSubscription[] {
+export function parseSubscriptions(raw: string): CandleSubscription[] {
   return raw.split(",").map((item) => {
-    const [symbol, timeframe] = item.trim().split(":");
+    const value = item.trim();
+    const separator = value.lastIndexOf(":");
+    if (separator <= 0 || separator === value.length - 1) {
+      throw new Error(`Invalid MARKET_SUBSCRIPTIONS item: ${item}`);
+    }
+    const symbol = value.slice(0, separator).trim();
+    const timeframe = value.slice(separator + 1).trim();
     if (!symbol || !timeframe) throw new Error(`Invalid MARKET_SUBSCRIPTIONS item: ${item}`);
     return { symbol: symbol.toUpperCase(), timeframe };
   });
@@ -23,6 +30,13 @@ function parseSubscriptions(raw: string): CandleSubscription[] {
 
 function createProvider(name: string): StreamingMarketDataProvider {
   switch (name.toLowerCase()) {
+    case "tradingview":
+      return new TradingViewMarketDataProvider({
+        token: process.env.TRADINGVIEW_SESSION_ID,
+        signature: process.env.TRADINGVIEW_SESSION_SIGNATURE,
+        session: parseTradingViewSession(process.env.TRADINGVIEW_MARKET_SESSION),
+        includeCurrentHistoricalBar: false,
+      });
     case "binance":
       return new BinanceMarketDataProvider();
     case "bybit":
@@ -36,10 +50,17 @@ function createProvider(name: string): StreamingMarketDataProvider {
   }
 }
 
+function parseTradingViewSession(value: string | undefined): "regular" | "extended" | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "regular" || normalized === "extended") return normalized;
+  throw new Error("TRADINGVIEW_MARKET_SESSION must be regular or extended");
+}
+
 async function main(): Promise<void> {
-  const providerName = process.env.MARKET_PROVIDER ?? "binance";
+  const providerName = process.env.MARKET_PROVIDER ?? "tradingview";
   const subscriptions = parseSubscriptions(
-    process.env.MARKET_SUBSCRIPTIONS ?? "BTCUSDT:15m,ETHUSDT:15m"
+    process.env.MARKET_SUBSCRIPTIONS ?? "BINANCE:BTCUSDT:15m,NASDAQ:AAPL:15m"
   );
   const engineUrl = process.env.QUANT_ENGINE_URL ?? "http://localhost:8420";
 
