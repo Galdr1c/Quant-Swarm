@@ -262,7 +262,7 @@ function waitForChartHistory(
     const timeout = setTimeout(() => {
       finishError(new Error(`TradingView history timed out for ${options.symbol}`));
     }, options.requestTimeoutMs);
-    timeout.unref?.();
+    unrefTimer(timeout);
 
     const cleanup = (): void => {
       clearTimeout(timeout);
@@ -301,7 +301,7 @@ function waitForChartHistory(
       }
       if (settleTimer) clearTimeout(settleTimer);
       settleTimer = setTimeout(finishSuccess, options.settleMs);
-      settleTimer.unref?.();
+      unrefTimer(settleTimer);
     });
 
     chart.setMarket(options.symbol, compactObject({
@@ -418,7 +418,7 @@ class TradingViewCandleStream implements CandleStream {
       this.reconnectTimer = undefined;
       this.connect();
     }, delay);
-    this.reconnectTimer.unref?.();
+    unrefTimer(this.reconnectTimer);
   }
 
   private cleanupClient(): void {
@@ -481,7 +481,11 @@ function safelyDeleteChart(chart: TradingViewChartLike): void {
   }
 }
 
-function compactObject<T extends Record<string, unknown>>(value: T): T {
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  (timer as unknown as { unref?: () => void }).unref?.();
+}
+
+function compactObject<T extends object>(value: T): T {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined)
   ) as T;
