@@ -16,7 +16,14 @@ export interface SyntheticConfig {
   seed?: number;
   /** Indices where anomalies should be injected (volume spikes + dislocations) */
   anomalyIndices?: number[];
+  /**
+   * Exclusive end/reference timestamp for the generated series.
+   * Defaults to a fixed UTC instant so the same seed/config is fully reproducible.
+   */
+  endTimestamp?: number;
 }
+
+const DEFAULT_END_TIMESTAMP = Date.UTC(2026, 0, 1, 0, 0, 0, 0);
 
 // ─── Seeded PRNG (Mulberry32) ─────────────────────────────────────────────────
 
@@ -34,7 +41,6 @@ function mulberry32(seed: number): () => number {
 function normalRandom(rng: () => number): number {
   let u1 = rng();
   let u2 = rng();
-  // Avoid log(0)
   while (u1 === 0) u1 = rng();
   return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
 }
@@ -45,7 +51,7 @@ function normalRandom(rng: () => number): number {
  * Generates realistic synthetic OHLCV data using Geometric Brownian Motion.
  *
  * Key features:
- * - Seeded PRNG for reproducibility
+ * - Seeded PRNG and deterministic timestamps for full reproducibility
  * - Configurable volatility/drift
  * - Anomaly injection at specified indices (for scanner testing)
  * - Realistic intra-candle high/low generation
@@ -63,6 +69,7 @@ export class SyntheticMarketDataProvider implements MarketDataProvider {
       baseVolume: config.baseVolume ?? 1000,
       seed: config.seed ?? 42,
       anomalyIndices: config.anomalyIndices ?? [],
+      endTimestamp: config.endTimestamp ?? DEFAULT_END_TIMESTAMP,
     };
   }
 
@@ -75,6 +82,7 @@ export class SyntheticMarketDataProvider implements MarketDataProvider {
     const candles: OHLCV[] = [];
 
     const candleMinutes = this.parseTimeframe(timeframe);
+    const candleMs = candleMinutes * 60 * 1000;
     const candlesPerYear = (365.25 * 24 * 60) / candleMinutes;
     const dt = 1 / candlesPerYear;
     const driftPerCandle = this.config.drift * dt;
@@ -83,17 +91,15 @@ export class SyntheticMarketDataProvider implements MarketDataProvider {
     let price = this.config.startPrice;
     const anomalySet = new Set(this.config.anomalyIndices);
 
-    // Start timestamp: 260 days ago from a fixed reference
-    let timestamp = Date.now() - limit * candleMinutes * 60 * 1000;
+    // The final generated candle starts one interval before endTimestamp.
+    let timestamp = this.config.endTimestamp - limit * candleMs;
 
     for (let i = 0; i < limit; i++) {
       const isAnomaly = anomalySet.has(i);
 
-      // GBM step
       const z = normalRandom(rng);
       const returnVal = driftPerCandle + volPerCandle * z;
 
-      // Anomaly: inject a large move
       const anomalyMultiplier = isAnomaly ? (rng() > 0.5 ? 3.5 : -3.5) : 1;
       const adjustedReturn = isAnomaly
         ? returnVal * anomalyMultiplier
@@ -102,14 +108,12 @@ export class SyntheticMarketDataProvider implements MarketDataProvider {
       const open = price;
       const close = open * Math.exp(adjustedReturn);
 
-      // Realistic high/low: random intra-candle range
       const range = Math.abs(close - open);
       const extraHigh = range * (0.1 + rng() * 0.5);
       const extraLow = range * (0.1 + rng() * 0.5);
       const high = Math.max(open, close) + extraHigh;
       const low = Math.min(open, close) - extraLow;
 
-      // Volume: base + seasonality + noise + anomaly spike
       const hourOfDay = ((i * candleMinutes) / 60) % 24;
       const seasonality =
         1 + 0.3 * Math.sin((2 * Math.PI * (hourOfDay - 14)) / 24);
@@ -131,7 +135,7 @@ export class SyntheticMarketDataProvider implements MarketDataProvider {
       });
 
       price = close;
-      timestamp += candleMinutes * 60 * 1000;
+      timestamp += candleMs;
     }
 
     return candles;
@@ -139,7 +143,7 @@ export class SyntheticMarketDataProvider implements MarketDataProvider {
 
   private parseTimeframe(tf: string): number {
     const match = tf.match(/^(\d+)(m|h|d|w)$/);
-    if (!match) return 15; // default 15m
+    if (!match) return 15;
 
     const value = parseInt(match[1], 10);
     switch (match[2]) {
