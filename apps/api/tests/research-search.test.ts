@@ -163,15 +163,15 @@ class FakeQuantClient implements ResearchQuantClient {
   }
 }
 
-describe("runResearchSearch", () => {
-  it("calibrates regimes on discovery, selects on OOS and builds complete ledger evidence", async () => {
-    const ledger = new MemoryResearchLedger();
-    const quant = new FakeQuantClient();
-    const calibration = candles(0);
-    const validation = candles(1_000_000);
-    const holdout = candles(2_000_000);
-
-    const result = await runResearchSearch({
+function searchParams(ledger: MemoryResearchLedger, quant: ResearchQuantClient, runId: string) {
+  const calibration = candles(0);
+  const validation = candles(1_000_000);
+  const holdout = candles(2_000_000);
+  return {
+    calibration,
+    validation,
+    holdout,
+    params: {
       event,
       context: { recentCandles: calibration.slice(-20) },
       agents: [
@@ -185,11 +185,21 @@ describe("runResearchSearch", () => {
       ledger,
       quant,
       options: {
-        runId: "run-test",
+        runId,
         annualization: 365.25 * 24 * 4,
         coordinator: { maxConcurrency: 2, timeoutMs: 1000 },
       },
-    });
+    },
+  };
+}
+
+describe("runResearchSearch", () => {
+  it("claims the run, persists strategy snapshots and completes the audit lifecycle", async () => {
+    const ledger = new MemoryResearchLedger();
+    const quant = new FakeQuantClient();
+    const { calibration, validation, params } = searchParams(ledger, quant, "run-test");
+
+    const result = await runResearchSearch(params);
 
     expect(quant.calibrationCandlesSeen?.[0].timestamp).toBe(calibration[0].timestamp);
     expect(result.regimeCalibration.lookback).toBe(5);
@@ -203,6 +213,12 @@ describe("runResearchSearch", () => {
     expect(records.every((row) => (row.metrics.outOfSampleReturns?.length ?? 0) > 2)).toBe(true);
     expect(records.every((row) => row.metrics.pValue !== undefined)).toBe(true);
     expect(records.every((row) => Object.keys(row.metrics.regimeReturns ?? {}).length === 3)).toBe(true);
+    expect(records.every((row) => row.strategySnapshot?.id === row.strategyId)).toBe(true);
+    expect(records.every((row) => /^[a-f0-9]{64}$/.test(row.strategyFingerprint ?? ""))).toBe(true);
+
+    const run = await ledger.getRun("run-test");
+    expect(run?.status).toBe("COMPLETED");
+    expect(run?.selectedTrialId).toBe(result.selectedTrialId);
 
     expect(result.evidence.trialSharpes).toHaveLength(3);
     expect(result.evidence.candidatePValues).toHaveLength(3);
@@ -210,5 +226,21 @@ describe("runResearchSearch", () => {
     expect(Object.keys(result.evidence.regimeReturns ?? {})).toEqual(["trending", "ranging", "volatile"]);
     expect(result.evidence.purgedCv?.nObservations).toBe(validation.length);
     expect(result.researchValidation.overallVerdict).toBe("PASS");
+
+    await expect(runResearchSearch(params)).rejects.toThrow(/already exists/);
+  });
+
+  it("marks a claimed run FAILED when deterministic research infrastructure errors", async () => {
+    const ledger = new MemoryResearchLedger();
+    const quant = new FakeQuantClient();
+    quant.calibrateRegimes = async () => {
+      throw new Error("calibration unavailable");
+    };
+    const { params } = searchParams(ledger, quant, "run-failed");
+
+    await expect(runResearchSearch(params)).rejects.toThrow(/calibration unavailable/);
+    const run = await ledger.getRun("run-failed");
+    expect(run?.status).toBe("FAILED");
+    expect(run?.error).toContain("calibration unavailable");
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "quant-swarm",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "AI Quant Research Platform — multi-agent research, deterministic market scanning/backtesting, statistical validation, and sovereign risk controls",
   "scripts": {
     "build": "pnpm -r build",
