@@ -2,11 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
+import type { StrategyDefinition } from "@quant-swarm/strategy-schema";
 import {
   JsonlResearchLedger,
   MemoryResearchLedger,
   buildResearchEvidence,
   createTrialRecord,
+  fingerprintStrategy,
   type ResearchTrialRecord,
 } from "../src/index.js";
 
@@ -15,7 +17,29 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
+function strategy(id: string, reverseParams = false): StrategyDefinition {
+  return {
+    id,
+    name: id,
+    market: { symbol: "BTCUSDT", timeframe: "15m" },
+    indicators: [
+      {
+        id: "rsi",
+        type: "RSI",
+        params: reverseParams
+          ? { source: "close", length: 14 }
+          : { length: 14, source: "close" },
+      },
+    ],
+    entry: { operator: "AND", rules: [{ left: "rsi", operator: "<", right: 30 }] },
+    exit: { operator: "OR", rules: [{ left: "rsi", operator: ">", right: 55 }] },
+    risk: { stopLossPct: 2, takeProfitPct: 4, maxPositionPct: 3 },
+  };
+}
+
 function trial(overrides: Partial<ResearchTrialRecord> = {}): ResearchTrialRecord {
+  const strategyId = overrides.strategyId ?? "strategy-1";
+  const strategySnapshot = overrides.strategySnapshot ?? strategy(strategyId);
   return createTrialRecord({
     runId: "run-1",
     trialId: "trial-1",
@@ -27,7 +51,8 @@ function trial(overrides: Partial<ResearchTrialRecord> = {}): ResearchTrialRecor
       timestamp: 900,
       metadata: { volume_z_score: 4 },
     },
-    strategyId: "strategy-1",
+    strategyId,
+    strategySnapshot,
     confidence: 0.7,
     provenance: {
       provider: "openai",
@@ -50,27 +75,68 @@ function trial(overrides: Partial<ResearchTrialRecord> = {}): ResearchTrialRecor
 }
 
 describe("research ledgers", () => {
-  it("keeps independent copies in memory", async () => {
+  it("atomically claims runs and keeps idempotent trial identities in memory", async () => {
     const ledger = new MemoryResearchLedger();
+    expect(await ledger.claimRun("run-1", 1_000)).toBe(true);
+    expect(await ledger.claimRun("run-1", 1_001)).toBe(false);
+
     const record = trial();
-    await ledger.append(record);
+    expect(await ledger.append(record)).toBe("inserted");
+    expect(await ledger.append(record)).toBe("duplicate");
+
+    await expect(ledger.append(trial({ metrics: { sharpe: 9 } }))).rejects.toThrow(/Conflicting/);
+
     record.metrics.sharpe = 99;
     const [stored] = await ledger.list("run-1");
     expect(stored.metrics.sharpe).toBe(1.2);
+    expect(stored.strategyFingerprint).toBe(fingerprintStrategy(stored.strategySnapshot!));
+
+    await ledger.finishRun("run-1", {
+      status: "COMPLETED",
+      updatedAt: 2_000,
+      selectedTrialId: "trial-1",
+    });
+    expect((await ledger.getRun("run-1"))?.status).toBe("COMPLETED");
+    await expect(ledger.append(trial({ trialId: "trial-2" }))).rejects.toThrow(/not writable/);
   });
 
-  it("persists append-only JSONL records and filters by run", async () => {
+  it("persists JSONL run claims, terminal state and trial records", async () => {
     const dir = await mkdtemp(join(tmpdir(), "quant-swarm-ledger-"));
     tempDirs.push(dir);
     const ledger = new JsonlResearchLedger(join(dir, "research", "trials.jsonl"));
+
+    expect(await ledger.claimRun("run-1", 1_000)).toBe(true);
+    expect(await ledger.claimRun("run-1", 1_001)).toBe(false);
+    expect(await ledger.claimRun("run-2", 1_100)).toBe(true);
+
     await ledger.append(trial());
     await ledger.append(trial({ runId: "run-2", trialId: "trial-2", strategyId: "strategy-2" }));
+    await ledger.finishRun("run-1", {
+      status: "COMPLETED",
+      updatedAt: 2_000,
+      selectedTrialId: "trial-1",
+    });
 
     const all = await ledger.list();
     const run1 = await ledger.list("run-1");
     expect(all).toHaveLength(2);
     expect(run1).toHaveLength(1);
     expect(run1[0].provenance.model).toBe("gpt-6-astra");
+    expect((await ledger.getRun("run-1"))?.selectedTrialId).toBe("trial-1");
+  });
+
+  it("fingerprints canonical Strategy DSL independent of object key order", () => {
+    expect(fingerprintStrategy(strategy("same", false))).toBe(
+      fingerprintStrategy(strategy("same", true))
+    );
+  });
+
+  it("rejects a tampered strategy fingerprint", () => {
+    const record = trial();
+    expect(() => createTrialRecord({
+      ...record,
+      strategyFingerprint: "0".repeat(64),
+    })).toThrow(/strategyFingerprint/);
   });
 
   it("rejects non-finite OOS and regime return evidence", () => {
