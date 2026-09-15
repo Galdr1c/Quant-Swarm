@@ -10,7 +10,7 @@ declare module "@mathieuc/tradingview" {
   }
 
   interface TradingViewModule {
-    Client: new (options?: Record<string, unknown>) => any;
+    Client: new (options?: object) => any;
     searchMarketV3(
       search: string,
       filter?: "stock" | "futures" | "forex" | "cfd" | "crypto" | "index" | "economic" | "",
