@@ -71,6 +71,14 @@ export interface ResearchSearchResult {
   researchValidation: ValidationReport;
 }
 
+type EvaluationOutcome =
+  | { ok: true; index: number; evaluation: TrialEvaluation }
+  | {
+      ok: false;
+      index: number;
+      failure: { agentName: string; strategyId: string; message: string };
+    };
+
 /**
  * Execute a bounded strategy-search run without letting an LLM grade itself.
  *
@@ -104,17 +112,18 @@ export async function runResearchSearch(params: {
   if (!options.runId.trim()) throw new Error("runId must be non-empty");
   if (validationCandles.length < 4) throw new Error("validationCandles must contain at least four bars");
   if (finalHoldoutCandles.length < 4) throw new Error("finalHoldoutCandles must contain at least four bars");
+  if ((await ledger.list(options.runId)).length > 0) {
+    throw new Error(`Research runId already exists in ledger: ${options.runId}`);
+  }
 
   const annualization = positiveFinite(options.annualization, 365.25 * 24 * 4);
   const minimumSuccessfulTrials = Math.max(2, Math.floor(options.minimumSuccessfulTrials ?? 2));
   const coordinator = new MultiAgentResearchCoordinator(agents, options.coordinator);
   const coordination = await coordinator.investigate(event, context);
+  const runCreatedAt = Date.now();
 
-  const evaluations: TrialEvaluation[] = [];
-  const evaluationFailures: { agentName: string; strategyId: string; message: string }[] = [];
-
-  await Promise.all(
-    coordination.hypotheses.map(async (row, index) => {
+  const outcomes = await Promise.all(
+    coordination.hypotheses.map(async (row, index): Promise<EvaluationOutcome> => {
       const strategy = row.hypothesis.strategy;
       try {
         const backtest = await quant.backtest(strategy, validationCandles);
@@ -124,7 +133,7 @@ export async function runResearchSearch(params: {
         const record = createTrialRecord({
           runId: options.runId,
           trialId,
-          createdAt: Date.now(),
+          createdAt: runCreatedAt + index,
           candidate: event,
           strategyId: strategy.id,
           confidence: row.hypothesis.confidence,
@@ -145,33 +154,58 @@ export async function runResearchSearch(params: {
             outOfSampleReturns: equityReturns(backtest.equityCurve),
           },
         });
-        await ledger.append(record);
-        evaluations.push({ trialId, agentName: row.agentName, record, backtest });
+        return {
+          ok: true,
+          index,
+          evaluation: { trialId, agentName: row.agentName, record, backtest },
+        };
       } catch (error) {
-        evaluationFailures.push({
-          agentName: row.agentName,
-          strategyId: strategy.id,
-          message: errorMessage(error),
-        });
+        return {
+          ok: false,
+          index,
+          failure: {
+            agentName: row.agentName,
+            strategyId: strategy.id,
+            message: errorMessage(error),
+          },
+        };
       }
     })
   );
 
-  if (evaluations.length < minimumSuccessfulTrials) {
+  const successfulOutcomes = outcomes
+    .filter((outcome): outcome is Extract<EvaluationOutcome, { ok: true }> => outcome.ok)
+    .sort((a, b) => a.index - b.index);
+  const evaluationFailures = outcomes
+    .filter((outcome): outcome is Extract<EvaluationOutcome, { ok: false }> => !outcome.ok)
+    .sort((a, b) => a.index - b.index)
+    .map((outcome) => outcome.failure);
+
+  if (successfulOutcomes.length < minimumSuccessfulTrials) {
     throw new Error(
-      `Research run produced ${evaluations.length} successful trials; at least ${minimumSuccessfulTrials} are required`
+      `Research run produced ${successfulOutcomes.length} successful trials; at least ${minimumSuccessfulTrials} are required`
     );
   }
 
-  evaluations.sort(compareTrialEvaluations);
-  const selected = evaluations[0];
+  // Persist in stable coordination order so JSONL evidence is reproducible even
+  // when local backtests/PSR calls finish in a different order.
+  for (const outcome of successfulOutcomes) {
+    await ledger.append(outcome.evaluation.record);
+  }
+
+  const evaluations = successfulOutcomes.map((outcome) => outcome.evaluation);
+  const ranked = [...evaluations].sort(compareTrialEvaluations);
+  const selected = ranked[0];
+  const selectedStrategy = coordination.hypotheses.find(
+    (row) => row.hypothesis.strategy.id === selected.record.strategyId
+  )?.hypothesis.strategy;
+  if (!selectedStrategy) throw new Error("Selected strategy could not be resolved from coordination result");
+  if (selected.backtest.strategyId !== selectedStrategy.id) {
+    throw new Error("Selected strategy provenance mismatch");
+  }
+
   const validationBacktest = selected.backtest;
-  const finalHoldoutBacktest = await quant.backtest(
-    selected.record.strategyId === selected.backtest.strategyId
-      ? coordination.hypotheses.find((row) => row.hypothesis.strategy.id === selected.record.strategyId)!.hypothesis.strategy
-      : (() => { throw new Error("Selected strategy provenance mismatch"); })(),
-    finalHoldoutCandles
-  );
+  const finalHoldoutBacktest = await quant.backtest(selectedStrategy, finalHoldoutCandles);
 
   const records = await ledger.list(options.runId);
   const evidence = buildResearchEvidence(records, selected.trialId, {
@@ -184,11 +218,6 @@ export async function runResearchSearch(params: {
     },
   });
   const researchValidation = await quant.validateResearch(finalHoldoutBacktest, evidence);
-
-  const selectedStrategy = coordination.hypotheses.find(
-    (row) => row.hypothesis.strategy.id === selected.record.strategyId
-  )?.hypothesis.strategy;
-  if (!selectedStrategy) throw new Error("Selected strategy could not be resolved from coordination result");
 
   return {
     runId: options.runId,
