@@ -256,7 +256,9 @@ export interface PostgresResearchLedgerOptions {
  * Atomic run claims use a primary key on `run_id`. Trial writes use a composite
  * primary key `(run_id, trial_id)` plus a canonical record hash: replaying the
  * exact same trial is a no-op, while a different payload for the same identity
- * is rejected as an integrity conflict.
+ * is rejected as an integrity conflict. Bootstrap DDL is serialized with a
+ * transaction-scoped advisory lock so concurrent cold-start workers cannot race
+ * while creating the same schema objects.
  */
 export class PostgresResearchLedger implements ResearchLedger {
   private readonly pool: Pool;
@@ -414,42 +416,60 @@ export class PostgresResearchLedger implements ResearchLedger {
   }
 
   private async initialize(): Promise<void> {
-    await this.pool.query(`CREATE SCHEMA IF NOT EXISTS ${this.quotedSchema()}`);
-    await this.pool.query(
-      `CREATE TABLE IF NOT EXISTS ${this.table("research_runs")} (
-        run_id TEXT PRIMARY KEY,
-        created_at_ms BIGINT NOT NULL,
-        updated_at_ms BIGINT NOT NULL,
-        status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
-        selected_trial_id TEXT,
-        error TEXT
-      )`
-    );
-    await this.pool.query(
-      `CREATE TABLE IF NOT EXISTS ${this.table("research_trials")} (
-        run_id TEXT NOT NULL REFERENCES ${this.table("research_runs")}(run_id) ON DELETE RESTRICT,
-        trial_id TEXT NOT NULL,
-        created_at_ms BIGINT NOT NULL,
-        strategy_id TEXT NOT NULL,
-        strategy_fingerprint TEXT,
-        provider TEXT NOT NULL,
-        model TEXT NOT NULL,
-        prompt_version TEXT NOT NULL,
-        record_hash TEXT NOT NULL,
-        record JSONB NOT NULL,
-        inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (run_id, trial_id)
-      )`
-    );
-    await this.pool.query(
-      `CREATE INDEX IF NOT EXISTS research_trials_strategy_fingerprint_idx
-         ON ${this.table("research_trials")}(strategy_fingerprint)
-        WHERE strategy_fingerprint IS NOT NULL`
-    );
-    await this.pool.query(
-      `CREATE INDEX IF NOT EXISTS research_trials_strategy_id_idx
-         ON ${this.table("research_trials")}(strategy_id)`
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext($1))",
+        [`quant-swarm:research-ledger:${this.schema}`]
+      );
+      await client.query(`CREATE SCHEMA IF NOT EXISTS ${this.quotedSchema()}`);
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.table("research_runs")} (
+          run_id TEXT PRIMARY KEY,
+          created_at_ms BIGINT NOT NULL,
+          updated_at_ms BIGINT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
+          selected_trial_id TEXT,
+          error TEXT
+        )`
+      );
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.table("research_trials")} (
+          run_id TEXT NOT NULL REFERENCES ${this.table("research_runs")}(run_id) ON DELETE RESTRICT,
+          trial_id TEXT NOT NULL,
+          created_at_ms BIGINT NOT NULL,
+          strategy_id TEXT NOT NULL,
+          strategy_fingerprint TEXT,
+          provider TEXT NOT NULL,
+          model TEXT NOT NULL,
+          prompt_version TEXT NOT NULL,
+          record_hash TEXT NOT NULL,
+          record JSONB NOT NULL,
+          inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (run_id, trial_id)
+        )`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS research_trials_strategy_fingerprint_idx
+           ON ${this.table("research_trials")}(strategy_fingerprint)
+          WHERE strategy_fingerprint IS NOT NULL`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS research_trials_strategy_id_idx
+           ON ${this.table("research_trials")}(strategy_id)`
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Preserve the original bootstrap failure.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   private quotedSchema(): string {
