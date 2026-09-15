@@ -64,6 +64,7 @@ export interface ResearchAgent {
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 export { MockResearchAgent } from "./mock-agent.js";
+export type { MockResearchAgentOptions } from "./mock-agent.js";
 export {
   KimiResearchAgent,
   OpenAIResearchAgent,
