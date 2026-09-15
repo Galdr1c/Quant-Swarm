@@ -27,7 +27,13 @@ export interface MarketSnapshot {
 export type CandidateEventType =
   | "VOLUME_ANOMALY"
   | "VOLATILITY_EXPANSION"
-  | "PRICE_DISLOCATION";
+  | "PRICE_DISLOCATION"
+  | "ORDERBOOK_IMBALANCE"
+  | "FUNDING_EXTREME"
+  | "OPEN_INTEREST_EXPANSION"
+  | "BASIS_DISLOCATION"
+  | "SPREAD_WIDENING"
+  | "LIQUIDATION_SPIKE";
 
 export interface CandidateEvent {
   symbol: string;
