@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e "services/quant-engine[dev]"
+      - run: cd services/quant-engine && python -m pytest tests/ -v
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pnpm install --no-frozen-lockfile
+      - run: python -m pip install -e "services/quant-engine[dev]"
+      - name: Start quant engine
+        run: |
+          python -m uvicorn src.api.server:app --app-dir services/quant-engine --port 8420 > /tmp/quant-engine.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8420/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/quant-engine.log
+          exit 1
+      - run: pnpm run pipeline

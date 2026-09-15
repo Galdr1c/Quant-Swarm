@@ -1,8 +1,9 @@
 """
 Deterministic anomaly scanner.
 
-Detects volume spikes, price dislocations, and volatility expansions
-using z-scores over rolling windows. No LLM involved.
+Detects volume spikes, price dislocations, and volatility expansions using
+z-scores against *prior* observations only. The current bar is never included
+in its own baseline, avoiding self-damping and look-ahead-like behavior.
 """
 
 from dataclasses import dataclass, field
@@ -15,26 +16,30 @@ from numpy.typing import NDArray
 @dataclass
 class CandidateEvent:
     symbol: str
-    event_type: str  # VOLUME_ANOMALY | PRICE_DISLOCATION | VOLATILITY_EXPANSION
+    event_type: str
     score: float
     timestamp: int
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def compute_z_scores(values: NDArray, window: int) -> NDArray:
-    """Rolling z-score calculation."""
-    result = np.full_like(values, np.nan, dtype=np.float64)
-    if len(values) < window:
+    """Compute current-value z-score against the previous `window` values."""
+    if window < 2:
+        raise ValueError("window must be >= 2")
+
+    arr = np.asarray(values, dtype=np.float64)
+    result = np.full(arr.shape, np.nan, dtype=np.float64)
+    if len(arr) <= window:
         return result
 
-    for i in range(window - 1, len(values)):
-        window_data = values[i - window + 1 : i + 1]
-        mean = np.mean(window_data)
-        std = np.std(window_data, ddof=1)
-        if std > 1e-10:
-            result[i] = (values[i] - mean) / std
-        else:
-            result[i] = 0.0
+    for i in range(window, len(arr)):
+        history = arr[i - window : i]
+        current = arr[i]
+        if not np.isfinite(current) or not np.all(np.isfinite(history)):
+            continue
+        mean = float(np.mean(history))
+        std = float(np.std(history, ddof=1))
+        result[i] = (current - mean) / std if std > 1e-10 else 0.0
 
     return result
 
@@ -50,36 +55,34 @@ def scan_ohlcv(
     z_threshold: float = 3.0,
     lookback_window: int = 100,
 ) -> list[CandidateEvent]:
-    """
-    Scan OHLCV data for anomalies.
-
-    Returns CandidateEvents where z-scores exceed threshold.
-    Designed to filter 10,000 observations down to ~10-20 interesting events.
-    """
+    """Scan OHLCV data for deterministic anomaly candidates."""
     events: list[CandidateEvent] = []
 
-    if len(close) < lookback_window + 1:
+    arrays = [timestamps, open_arr, high, low, close, volume]
+    n = len(close)
+    if any(len(a) != n for a in arrays):
+        raise ValueError("OHLCV arrays must have identical lengths")
+    if n <= lookback_window + 1:
         return events
 
-    # Volume z-scores
     volume_z = compute_z_scores(volume, lookback_window)
 
-    # Return z-scores (log returns)
-    log_returns = np.full_like(close, np.nan, dtype=np.float64)
-    log_returns[1:] = np.log(close[1:] / close[:-1])
+    log_returns = np.full(n, np.nan, dtype=np.float64)
+    valid_prices = (close[1:] > 0) & (close[:-1] > 0)
+    computed_returns = np.full(n - 1, np.nan, dtype=np.float64)
+    computed_returns[valid_prices] = np.log(close[1:][valid_prices] / close[:-1][valid_prices])
+    log_returns[1:] = computed_returns
     return_z = compute_z_scores(log_returns, lookback_window)
 
-    # ATR-based volatility expansion
     from ..indicators.technical import atr as compute_atr
 
     atr_values = compute_atr(high, low, close, 14)
     atr_z = compute_z_scores(atr_values, lookback_window)
 
-    for i in range(lookback_window, len(close)):
-        ts = int(timestamps[i]) if i < len(timestamps) else 0
+    for i in range(lookback_window, n):
+        ts = int(timestamps[i])
 
-        # Volume anomaly
-        if not np.isnan(volume_z[i]) and abs(volume_z[i]) >= z_threshold:
+        if np.isfinite(volume_z[i]) and abs(volume_z[i]) >= z_threshold:
             events.append(
                 CandidateEvent(
                     symbol=symbol,
@@ -90,8 +93,7 @@ def scan_ohlcv(
                 )
             )
 
-        # Price dislocation
-        if not np.isnan(return_z[i]) and abs(return_z[i]) >= z_threshold:
+        if np.isfinite(return_z[i]) and abs(return_z[i]) >= z_threshold:
             events.append(
                 CandidateEvent(
                     symbol=symbol,
@@ -102,8 +104,7 @@ def scan_ohlcv(
                 )
             )
 
-        # Volatility expansion
-        if not np.isnan(atr_z[i]) and atr_z[i] >= z_threshold:
+        if np.isfinite(atr_z[i]) and atr_z[i] >= z_threshold:
             events.append(
                 CandidateEvent(
                     symbol=symbol,
