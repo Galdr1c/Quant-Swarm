@@ -34,13 +34,44 @@ export interface PsrEvidence {
   annualization: number;
 }
 
+export interface RegimeCalibration {
+  lookback: number;
+  volatilityHighBps: number;
+  trendEfficiencyHigh: number;
+  volatilityQuantile: number;
+  trendQuantile: number;
+}
+
+export interface RegimeReturnEvidence {
+  regimeReturns: Record<string, number[]>;
+  counts: Record<string, number>;
+  labeledObservations: number;
+  unlabeledObservations: number;
+  calibration: RegimeCalibration;
+}
+
 export interface ResearchQuantClient {
   backtest(strategy: StrategyDefinition, candles: OHLCV[]): Promise<BacktestWithEquity>;
   psr(equityCurve: number[], annualization: number): Promise<PsrEvidence>;
+  calibrateRegimes(
+    candles: OHLCV[],
+    options?: RegimeCalibrationOptions
+  ): Promise<RegimeCalibration>;
+  regimeReturns(
+    equityCurve: number[],
+    candles: OHLCV[],
+    calibration: RegimeCalibration
+  ): Promise<RegimeReturnEvidence>;
   validateResearch(
     result: BacktestWithEquity,
     evidence: ResearchValidationEvidence
   ): Promise<ValidationReport>;
+}
+
+export interface RegimeCalibrationOptions {
+  lookback?: number;
+  volatilityQuantile?: number;
+  trendQuantile?: number;
 }
 
 export interface ResearchSearchOptions {
@@ -49,6 +80,7 @@ export interface ResearchSearchOptions {
   minimumSuccessfulTrials?: number;
   coordinator?: MultiAgentCoordinatorOptions;
   purgedCv?: Omit<PurgedCvEvidence, "nObservations">;
+  regime?: RegimeCalibrationOptions;
 }
 
 export interface TrialEvaluation {
@@ -65,6 +97,7 @@ export interface ResearchSearchResult {
   trialEvaluations: TrialEvaluation[];
   agentFailures: { agentName: string; message: string; timedOut: boolean }[];
   evaluationFailures: { agentName: string; strategyId: string; message: string }[];
+  regimeCalibration: RegimeCalibration;
   validationBacktest: BacktestWithEquity;
   finalHoldoutBacktest: BacktestWithEquity;
   evidence: ResearchValidationEvidence;
@@ -82,16 +115,17 @@ type EvaluationOutcome =
 /**
  * Execute a bounded strategy-search run without letting an LLM grade itself.
  *
- * Agents see discovery context only. Every valid hypothesis is compared on the
- * same validation/OOS slice. The best validation Sharpe selects one strategy,
- * and that strategy is then backtested again on a separate final holdout slice.
- * The research validator receives the final holdout result plus evidence built
- * from the append-only trial ledger.
+ * Regime thresholds are calibrated only on the earlier discovery sample. Agents
+ * see discovery context only. Every valid hypothesis is compared on the same
+ * validation/OOS slice, where PSR and regime return evidence are computed by the
+ * Python quant engine. The best validation Sharpe selects one strategy and that
+ * strategy is evaluated again on a separate final holdout slice.
  */
 export async function runResearchSearch(params: {
   event: CandidateEvent;
   context: ResearchContext;
   agents: readonly ResearchAgent[];
+  regimeCalibrationCandles: OHLCV[];
   validationCandles: OHLCV[];
   finalHoldoutCandles: OHLCV[];
   ledger: ResearchLedger;
@@ -102,6 +136,7 @@ export async function runResearchSearch(params: {
     event,
     context,
     agents,
+    regimeCalibrationCandles,
     validationCandles,
     finalHoldoutCandles,
     ledger,
@@ -110,6 +145,9 @@ export async function runResearchSearch(params: {
   } = params;
 
   if (!options.runId.trim()) throw new Error("runId must be non-empty");
+  if (regimeCalibrationCandles.length < 10) {
+    throw new Error("regimeCalibrationCandles must contain enough discovery history");
+  }
   if (validationCandles.length < 4) throw new Error("validationCandles must contain at least four bars");
   if (finalHoldoutCandles.length < 4) throw new Error("finalHoldoutCandles must contain at least four bars");
   if ((await ledger.list(options.runId)).length > 0) {
@@ -118,6 +156,10 @@ export async function runResearchSearch(params: {
 
   const annualization = positiveFinite(options.annualization, 365.25 * 24 * 4);
   const minimumSuccessfulTrials = Math.max(2, Math.floor(options.minimumSuccessfulTrials ?? 2));
+  const regimeCalibration = await quant.calibrateRegimes(
+    regimeCalibrationCandles,
+    options.regime
+  );
   const coordinator = new MultiAgentResearchCoordinator(agents, options.coordinator);
   const coordination = await coordinator.investigate(event, context);
   const runCreatedAt = Date.now();
@@ -127,7 +169,10 @@ export async function runResearchSearch(params: {
       const strategy = row.hypothesis.strategy;
       try {
         const backtest = await quant.backtest(strategy, validationCandles);
-        const psr = await quant.psr(backtest.equityCurve, annualization);
+        const [psr, regime] = await Promise.all([
+          quant.psr(backtest.equityCurve, annualization),
+          quant.regimeReturns(backtest.equityCurve, validationCandles, regimeCalibration),
+        ]);
         const trialId = `${options.runId}:${String(index + 1).padStart(3, "0")}:${slug(row.agentName)}`;
         const provenance = row.hypothesis.provenance;
         const record = createTrialRecord({
@@ -152,6 +197,7 @@ export async function runResearchSearch(params: {
             expectancy: backtest.expectancy,
             pValue: psr.pValue,
             outOfSampleReturns: equityReturns(backtest.equityCurve),
+            regimeReturns: regime.regimeReturns,
           },
         });
         return {
@@ -188,7 +234,7 @@ export async function runResearchSearch(params: {
   }
 
   // Persist in stable coordination order so JSONL evidence is reproducible even
-  // when local backtests/PSR calls finish in a different order.
+  // when local backtests/stat calls finish in a different order.
   for (const outcome of successfulOutcomes) {
     await ledger.append(outcome.evaluation.record);
   }
@@ -226,6 +272,7 @@ export async function runResearchSearch(params: {
     trialEvaluations: evaluations,
     agentFailures: coordination.failures,
     evaluationFailures,
+    regimeCalibration,
     validationBacktest,
     finalHoldoutBacktest,
     evidence,
@@ -245,6 +292,30 @@ export class HttpResearchQuantClient implements ResearchQuantClient {
       equityCurve,
       benchmarkSharpe: 0,
       annualization,
+    });
+  }
+
+  calibrateRegimes(
+    candles: OHLCV[],
+    options: RegimeCalibrationOptions = {}
+  ): Promise<RegimeCalibration> {
+    return this.post<RegimeCalibration>("/regimes/calibrate", {
+      candles,
+      lookback: options.lookback ?? 48,
+      volatilityQuantile: options.volatilityQuantile ?? 0.67,
+      trendQuantile: options.trendQuantile ?? 0.67,
+    });
+  }
+
+  regimeReturns(
+    equityCurve: number[],
+    candles: OHLCV[],
+    calibration: RegimeCalibration
+  ): Promise<RegimeReturnEvidence> {
+    return this.post<RegimeReturnEvidence>("/stats/regime-returns", {
+      candles,
+      equityCurve,
+      calibration,
     });
   }
 
