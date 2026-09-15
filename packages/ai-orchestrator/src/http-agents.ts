@@ -5,6 +5,7 @@ import type {
   ResearchAgentProvenance,
   ResearchContext,
   ResearchHypothesis,
+  ResearchInvocationOptions,
 } from "./index.js";
 
 export type AgentFetch = typeof fetch;
@@ -150,10 +151,15 @@ export class OpenAIResearchAgent implements ResearchAgent {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async investigate(event: CandidateEvent, context: ResearchContext): Promise<ResearchHypothesis> {
+  async investigate(
+    event: CandidateEvent,
+    context: ResearchContext,
+    options: ResearchInvocationOptions = {}
+  ): Promise<ResearchHypothesis> {
     const startedAt = Date.now();
     const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
       method: "POST",
+      signal: options.signal,
       headers: {
         authorization: `Bearer ${this.apiKey}`,
         "content-type": "application/json",
@@ -206,10 +212,15 @@ export class KimiResearchAgent implements ResearchAgent {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async investigate(event: CandidateEvent, context: ResearchContext): Promise<ResearchHypothesis> {
+  async investigate(
+    event: CandidateEvent,
+    context: ResearchContext,
+    options: ResearchInvocationOptions = {}
+  ): Promise<ResearchHypothesis> {
     const startedAt = Date.now();
     const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
       method: "POST",
+      signal: options.signal,
       headers: {
         authorization: `Bearer ${this.apiKey}`,
         "content-type": "application/json",
