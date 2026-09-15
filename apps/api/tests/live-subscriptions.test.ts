@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSubscriptions } from "../src/live.js";
+import { parseSubscriptions } from "../src/live-config.js";
 
 describe("live market subscriptions", () => {
   it("parses TradingView exchange-qualified symbols using the final colon as timeframe separator", () => {
