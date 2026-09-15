@@ -37,6 +37,11 @@ export interface ResearchHypothesis {
   provenance?: ResearchAgentProvenance;
 }
 
+export interface ResearchInvocationOptions {
+  /** Cancellation signal owned by the application/coordinator. */
+  signal?: AbortSignal;
+}
+
 // ─── Research Agent Interface ─────────────────────────────────────────────────
 
 /**
@@ -51,7 +56,8 @@ export interface ResearchAgent {
 
   investigate(
     event: CandidateEvent,
-    context: ResearchContext
+    context: ResearchContext,
+    options?: ResearchInvocationOptions
   ): Promise<ResearchHypothesis>;
 }
 
@@ -71,6 +77,8 @@ export type {
 } from "./http-agents.js";
 export { MultiAgentResearchCoordinator } from "./swarm-coordinator.js";
 export type {
+  AgentFailure,
   CoordinatedHypothesis,
   MultiAgentCoordinatorOptions,
+  ResearchCoordinationResult,
 } from "./swarm-coordinator.js";
