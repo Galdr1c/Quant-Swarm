@@ -6,11 +6,12 @@
   "main": "./dist/pipeline.js",
   "scripts": {
     "build": "tsc",
+    "build:deps": "pnpm -r --filter @quant-swarm/shared --filter @quant-swarm/strategy-schema --filter @quant-swarm/market-data --filter @quant-swarm/risk-contracts --filter @quant-swarm/research-ledger --filter @quant-swarm/ai-orchestrator build",
     "test": "vitest run --passWithNoTests",
-    "pipeline": "pnpm -r --filter @quant-swarm/shared --filter @quant-swarm/strategy-schema --filter @quant-swarm/market-data --filter @quant-swarm/risk-contracts --filter @quant-swarm/ai-orchestrator build && tsc && node dist/pipeline.js",
-    "research:run": "pnpm -r --filter @quant-swarm/shared --filter @quant-swarm/strategy-schema --filter @quant-swarm/market-data --filter @quant-swarm/research-ledger --filter @quant-swarm/ai-orchestrator build && tsc && node dist/research.js",
-    "live:scan": "pnpm -r --filter @quant-swarm/shared --filter @quant-swarm/market-data build && tsc && node dist/live.js",
-    "live:intelligence": "pnpm -r --filter @quant-swarm/shared --filter @quant-swarm/market-data build && tsc && node dist/intelligence.js"
+    "pipeline": "pnpm run build:deps && tsc && node dist/pipeline.js",
+    "research:run": "pnpm run build:deps && tsc && node dist/research.js",
+    "live:scan": "pnpm run build:deps && tsc && node dist/live.js",
+    "live:intelligence": "pnpm run build:deps && tsc && node dist/intelligence.js"
   },
   "dependencies": {
     "@quant-swarm/shared": "workspace:*",
