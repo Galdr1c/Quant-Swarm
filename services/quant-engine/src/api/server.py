@@ -8,10 +8,11 @@ from pydantic import BaseModel, Field
 
 from ..backtest.engine import BacktestConfig, run_backtest
 from ..scanners.anomaly_scanner import scan_ohlcv
+from ..validation.advanced import equity_returns, probabilistic_sharpe_ratio, sharpe_ratio
 from ..validation.research_validator import validate_research
 from ..validation.validator import validate_backtest
 
-app = FastAPI(title="Quant Swarm Engine", version="0.2.0")
+app = FastAPI(title="Quant Swarm Engine", version="0.3.0")
 
 
 class Candle(BaseModel):
@@ -45,6 +46,12 @@ class ResearchValidateRequest(BaseModel):
     result: dict[str, Any]
     evidence: dict[str, Any] = Field(default_factory=dict)
     thresholds: dict[str, float] | None = None
+
+
+class PsrRequest(BaseModel):
+    equityCurve: list[float]
+    benchmarkSharpe: float = 0.0
+    annualization: float = Field(default=1.0, gt=0.0)
 
 
 def _arrays(candles: list[Candle]) -> tuple[np.ndarray, ...]:
@@ -133,6 +140,32 @@ def backtest(req: BacktestRequest) -> dict[str, Any]:
             "equityCurve": payload["equity_curve"],
         }
     )
+
+
+@app.post("/stats/psr")
+def psr(req: PsrRequest) -> dict[str, Any]:
+    """Return deterministic Sharpe significance evidence from an equity curve."""
+    returns = equity_returns(req.equityCurve)
+    if len(returns) < 3:
+        raise HTTPException(status_code=400, detail="equityCurve must produce at least three finite returns")
+
+    probability = probabilistic_sharpe_ratio(
+        returns,
+        benchmark_sharpe=req.benchmarkSharpe,
+        annualization=req.annualization,
+    )
+    if not math.isfinite(probability):
+        raise HTTPException(status_code=400, detail="PSR could not be evaluated for this equity curve")
+
+    observed_sharpe = sharpe_ratio(returns, annualization=req.annualization)
+    return {
+        "probability": round(float(probability), 8),
+        "pValue": round(float(1.0 - probability), 8),
+        "sharpe": round(float(observed_sharpe), 8),
+        "observations": int(len(returns)),
+        "benchmarkSharpe": float(req.benchmarkSharpe),
+        "annualization": float(req.annualization),
+    }
 
 
 @app.post("/validate")
