@@ -1,6 +1,6 @@
 {
   "name": "@quant-swarm/api",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "main": "./dist/pipeline.js",

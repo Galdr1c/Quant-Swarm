@@ -38,7 +38,7 @@ Shadow / Paper / Live
 - **Risk engine is sovereign** — AI cannot bypass exposure limits or the kill switch.
 - **Strategy DSL** — agents produce validated strategy JSON instead of arbitrary executable code.
 - **Research history is auditable** — evaluated trials retain provider/model provenance, the exact validated Strategy DSL snapshot, a canonical SHA-256 fingerprint, and deterministic numeric evidence.
-- **Run identity is protected** — durable ledgers atomically claim run IDs and make identical trial retries idempotent while rejecting conflicting payloads.
+- **Run identity is protected** — Postgres workers use expiring leases plus generation/token fencing, so stale workers cannot write after a crash/reclaim.
 - **Shadow first** — live trading is disabled by default.
 
 ## Project structure
@@ -192,19 +192,45 @@ This makes a historical trial reconstructable even if an agent later changes pro
 
 ### PostgreSQL backend
 
-`PostgresResearchLedger` creates a configurable schema with `research_runs` and `research_trials` tables. Primary keys enforce run/trial identities at the database boundary, JSONB stores the auditable record, and strategy ID/fingerprint indexes support later analysis.
+`PostgresResearchLedger` introduced the `research_runs` and `research_trials` schema, transactional run claims, JSONB audit records, and strategy ID/fingerprint indexes. Milestone 8 keeps that schema compatible while upgrading the runtime to leased/fenced claims.
 
-Use it with:
+## Milestone 8 — crash-safe run leases and fencing
+
+`RESEARCH_LEDGER_BACKEND=postgres` now uses `LeasedPostgresResearchLedger`.
+
+A Postgres research run owns an expiring lease containing a random token and monotonically increasing generation. The research executor renews that lease in the background while agent calls, deterministic backtests, statistics, and final validation are running.
+
+If a worker disappears, another worker may reclaim the same `runId` only after the previous lease expires. Reclaim increments the generation and issues a new random token. Every heartbeat, trial append, and terminal transition checks both values plus lease expiry. This is a fencing boundary: a paused old worker that resumes after reclaim cannot append evidence or mark the newer worker's run complete/failed.
+
+Each reclaimed attempt also receives a generation-scoped trial namespace such as `run:g2:001:agent`. Old partial trials remain in the audit ledger but are excluded from the new attempt's DSR/FDR/CSCV/regime evidence, avoiding accidental mixing across attempts.
+
+Default development settings:
+
+```text
+RESEARCH_RUN_LEASE_MS=120000
+RESEARCH_RUN_HEARTBEAT_MS=30000
+```
+
+Use a stable worker identity when your scheduler exposes one:
+
+```text
+RESEARCH_WORKER_ID=quant-worker-01
+```
+
+The Postgres bootstrap migrates Milestone 7 tables in place by adding lease columns under the existing advisory-lock-protected schema bootstrap. CI exercises active-lease exclusion, heartbeat extension, concurrent stale reclaim, old-worker fencing, terminal non-reclaim, and the complete Postgres-backed research smoke.
+
+Use the durable runtime with:
 
 ```bash
 RESEARCH_LEDGER_BACKEND=postgres \
 DATABASE_URL=postgresql://quant_swarm:password@localhost:5432/quant_swarm \
 RESEARCH_POSTGRES_SCHEMA=quant_swarm \
+RESEARCH_WORKER_ID=quant-worker-01 \
 RESEARCH_PROVIDERS=mock,mock,mock \
 pnpm run research:run
 ```
 
-The JSONL backend remains available for lightweight local development. CI runs a real PostgreSQL service, tests competing run claims/idempotent trial retries, and executes the complete research smoke against the Postgres backend.
+The JSONL backend remains available for lightweight single-worker/local development and intentionally does not claim multi-host lease safety.
 
 ## Quick start
 
@@ -283,8 +309,7 @@ Market-data and market-intelligence adapters require no trading API keys. Resear
 - Long-only backtester.
 - Purged K-fold is currently bar-horizon based; event-time label-interval purging/CPCV path construction can be added when supervised ML labels enter the platform.
 - Regime thresholds are deterministic but relative to a calibration sample; production research should monitor calibration drift across assets/timeframes rather than assume one threshold set is permanent.
-- Postgres run claims are durable and atomic, but abandoned `RUNNING` runs do not yet have lease/heartbeat expiry and automatic safe reclaim after a worker crash.
-- Database schema creation is automatic; a versioned migration system is not implemented yet.
+- Database schema creation/migration is still application-managed; a versioned external migration system is not implemented yet.
 - Provider adapters generate one hypothesis per configured agent call; adaptive budget allocation and candidate-aware fan-out are not implemented yet.
 - Milestone 3 intelligence thresholds are baseline development defaults and are not yet regime-adaptive.
 - Order-book snapshots are polling-based; persistent local L2 books from snapshot+delta streams are a later optimization.

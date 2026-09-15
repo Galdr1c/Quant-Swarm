@@ -8,9 +8,12 @@ import {
 import { SyntheticMarketDataProvider } from "@quant-swarm/market-data";
 import {
   JsonlResearchLedger,
-  PostgresResearchLedger,
   type ResearchLedger,
 } from "@quant-swarm/research-ledger";
+import {
+  LeasedPostgresResearchLedger,
+  type LeaseCapableResearchLedger,
+} from "@quant-swarm/research-ledger/leased-postgres";
 import type { CandidateEvent, OHLCV } from "@quant-swarm/shared";
 import { HttpResearchQuantClient, runResearchSearch } from "./research-search.js";
 
@@ -20,6 +23,8 @@ declare const process: {
 };
 
 const ENGINE_URL = process.env.QUANT_ENGINE_URL ?? "http://localhost:8420";
+
+type ResearchRuntimeLedger = ResearchLedger | LeaseCapableResearchLedger;
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${ENGINE_URL}${path}`, {
@@ -69,7 +74,7 @@ function createAgents(raw: string): ResearchAgent[] {
   });
 }
 
-function createLedger(): { ledger: ResearchLedger; backend: "jsonl" | "postgres" } {
+function createLedger(): { ledger: ResearchRuntimeLedger; backend: "jsonl" | "postgres" } {
   const backend = (process.env.RESEARCH_LEDGER_BACKEND ?? "jsonl").trim().toLowerCase();
   if (backend === "jsonl") {
     return {
@@ -86,7 +91,7 @@ function createLedger(): { ledger: ResearchLedger; backend: "jsonl" | "postgres"
     }
     return {
       backend,
-      ledger: new PostgresResearchLedger({
+      ledger: new LeasedPostgresResearchLedger({
         connectionString,
         schema: process.env.RESEARCH_POSTGRES_SCHEMA ?? "quant_swarm",
       }),
@@ -162,6 +167,11 @@ async function main(): Promise<void> {
           maxConcurrency: Number(process.env.RESEARCH_MAX_CONCURRENCY ?? 3),
           timeoutMs: Number(process.env.RESEARCH_AGENT_TIMEOUT_MS ?? 90_000),
         },
+        lease: {
+          workerId: process.env.RESEARCH_WORKER_ID,
+          leaseMs: Number(process.env.RESEARCH_RUN_LEASE_MS ?? 120_000),
+          heartbeatMs: Number(process.env.RESEARCH_RUN_HEARTBEAT_MS ?? 30_000),
+        },
         purgedCv: {
           nSplits: Number(process.env.RESEARCH_CV_SPLITS ?? 5),
           purgeBars: Number(process.env.RESEARCH_PURGE_BARS ?? 1),
@@ -175,7 +185,7 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log(`[research] run=${result.runId} ledger=${backend}`);
+    console.log(`[research] run=${result.runId} ledger=${backend}${result.leaseGeneration ? ` leaseGeneration=${result.leaseGeneration}` : ""}`);
     console.log(`[research] candidate=${event.type} score=${event.score.toFixed(3)}`);
     console.log(`[research] successfulTrials=${result.trialEvaluations.length} agentFailures=${result.agentFailures.length} evaluationFailures=${result.evaluationFailures.length}`);
     console.log(`[research] regimeCalibration vol>=${result.regimeCalibration.volatilityHighBps.toFixed(3)}bps trendEfficiency>=${result.regimeCalibration.trendEfficiencyHigh.toFixed(3)}`);
@@ -185,6 +195,7 @@ async function main(): Promise<void> {
 
     console.log(JSON.stringify({
       runId: result.runId,
+      leaseGeneration: result.leaseGeneration,
       selectedTrialId: result.selectedTrialId,
       selectedStrategyId: result.selectedStrategy.id,
       ledgerBackend: backend,

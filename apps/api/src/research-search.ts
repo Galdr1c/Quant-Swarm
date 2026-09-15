@@ -13,6 +13,10 @@ import {
   type ResearchValidationEvidence,
 } from "@quant-swarm/research-ledger";
 import type {
+  LeaseCapableResearchLedger,
+  ResearchRunLease,
+} from "@quant-swarm/research-ledger/leased-postgres";
+import type {
   BacktestResult,
   CandidateEvent,
   OHLCV,
@@ -74,6 +78,12 @@ export interface RegimeCalibrationOptions {
   trendQuantile?: number;
 }
 
+export interface ResearchLeaseOptions {
+  workerId?: string;
+  leaseMs?: number;
+  heartbeatMs?: number;
+}
+
 export interface ResearchSearchOptions {
   runId: string;
   annualization?: number;
@@ -81,6 +91,7 @@ export interface ResearchSearchOptions {
   coordinator?: MultiAgentCoordinatorOptions;
   purgedCv?: Omit<PurgedCvEvidence, "nObservations">;
   regime?: RegimeCalibrationOptions;
+  lease?: ResearchLeaseOptions;
 }
 
 export interface TrialEvaluation {
@@ -92,6 +103,7 @@ export interface TrialEvaluation {
 
 export interface ResearchSearchResult {
   runId: string;
+  leaseGeneration?: number;
   selectedTrialId: string;
   selectedStrategy: StrategyDefinition;
   trialEvaluations: TrialEvaluation[];
@@ -104,6 +116,8 @@ export interface ResearchSearchResult {
   researchValidation: ValidationReport;
 }
 
+type ResearchLedgerLike = ResearchLedger | LeaseCapableResearchLedger;
+
 type EvaluationOutcome =
   | { ok: true; index: number; evaluation: TrialEvaluation }
   | {
@@ -112,14 +126,21 @@ type EvaluationOutcome =
       failure: { agentName: string; strategyId: string; message: string };
     };
 
+interface LeaseHeartbeatController {
+  current(): ResearchRunLease;
+  ensure(): Promise<ResearchRunLease>;
+  stopAndRenew(): Promise<ResearchRunLease>;
+  stopBestEffort(): Promise<ResearchRunLease>;
+}
+
 /**
  * Execute a bounded strategy-search run without letting an LLM grade itself.
  *
- * The run id is atomically claimed before expensive work starts so multiple
- * workers cannot evaluate the same research run concurrently. Regime thresholds
- * are calibrated only on the earlier discovery sample. Agents see discovery
- * context only. Every valid hypothesis is compared on the same validation/OOS
- * slice, then the selected strategy is evaluated again on a separate holdout.
+ * Lease-capable ledgers atomically claim the run before expensive work, renew
+ * the lease in the background, and fence every trial/terminal write with a
+ * generation + random token. If a worker crashes, a later worker may reclaim
+ * only after expiry; a resumed stale worker cannot mutate the reclaimed run.
+ * JSONL/Memory ledgers retain the simpler single-worker lifecycle.
  */
 export async function runResearchSearch(params: {
   event: CandidateEvent;
@@ -128,7 +149,7 @@ export async function runResearchSearch(params: {
   regimeCalibrationCandles: OHLCV[];
   validationCandles: OHLCV[];
   finalHoldoutCandles: OHLCV[];
-  ledger: ResearchLedger;
+  ledger: ResearchLedgerLike;
   quant: ResearchQuantClient;
   options: ResearchSearchOptions;
 }): Promise<ResearchSearchResult> {
@@ -152,8 +173,38 @@ export async function runResearchSearch(params: {
   if (finalHoldoutCandles.length < 4) throw new Error("finalHoldoutCandles must contain at least four bars");
 
   const runCreatedAt = Date.now();
-  const claimed = await ledger.claimRun(options.runId, runCreatedAt);
-  if (!claimed) throw new Error(`Research runId already exists in ledger: ${options.runId}`);
+  const leasedLedger = isLeaseCapableResearchLedger(ledger) ? ledger : undefined;
+  let heartbeat: LeaseHeartbeatController | undefined;
+  let leaseGeneration: number | undefined;
+  let trialPrefix = `${options.runId}:`;
+
+  if (leasedLedger) {
+    const leaseMs = integerInRange(options.lease?.leaseMs, 120_000, 1_000, 24 * 60 * 60 * 1_000, "leaseMs");
+    const defaultHeartbeat = Math.max(250, Math.min(30_000, Math.floor(leaseMs / 3)));
+    const heartbeatMs = integerInRange(
+      options.lease?.heartbeatMs,
+      defaultHeartbeat,
+      250,
+      leaseMs - 1,
+      "heartbeatMs"
+    );
+    const workerId = options.lease?.workerId?.trim()
+      || `research-worker-${runCreatedAt}-${Math.random().toString(36).slice(2, 10)}`;
+    const lease = await leasedLedger.claimRunLease(options.runId, {
+      workerId,
+      now: runCreatedAt,
+      leaseMs,
+    });
+    if (!lease) {
+      throw new Error(`Research runId is terminal or has an active lease: ${options.runId}`);
+    }
+    heartbeat = startLeaseHeartbeat(leasedLedger, lease, leaseMs, heartbeatMs);
+    leaseGeneration = lease.generation;
+    trialPrefix = `${options.runId}:g${lease.generation}:`;
+  } else {
+    const claimed = await (ledger as ResearchLedger).claimRun(options.runId, runCreatedAt);
+    if (!claimed) throw new Error(`Research runId already exists in ledger: ${options.runId}`);
+  }
 
   try {
     const annualization = positiveFinite(options.annualization, 365.25 * 24 * 4);
@@ -162,8 +213,11 @@ export async function runResearchSearch(params: {
       regimeCalibrationCandles,
       options.regime
     );
+    await heartbeat?.ensure();
+
     const coordinator = new MultiAgentResearchCoordinator(agents, options.coordinator);
     const coordination = await coordinator.investigate(event, context);
+    await heartbeat?.ensure();
 
     const outcomes = await Promise.all(
       coordination.hypotheses.map(async (row, index): Promise<EvaluationOutcome> => {
@@ -174,7 +228,7 @@ export async function runResearchSearch(params: {
             quant.psr(backtest.equityCurve, annualization),
             quant.regimeReturns(backtest.equityCurve, validationCandles, regimeCalibration),
           ]);
-          const trialId = `${options.runId}:${String(index + 1).padStart(3, "0")}:${slug(row.agentName)}`;
+          const trialId = `${trialPrefix}${String(index + 1).padStart(3, "0")}:${slug(row.agentName)}`;
           const provenance = row.hypothesis.provenance;
           const record = createTrialRecord({
             runId: options.runId,
@@ -220,6 +274,7 @@ export async function runResearchSearch(params: {
         }
       })
     );
+    await heartbeat?.ensure();
 
     const successfulOutcomes = outcomes
       .filter((outcome): outcome is Extract<EvaluationOutcome, { ok: true }> => outcome.ok)
@@ -235,10 +290,13 @@ export async function runResearchSearch(params: {
       );
     }
 
-    // Persist in stable coordination order. The ledger itself enforces
-    // idempotency and rejects conflicting trial identities.
     for (const outcome of successfulOutcomes) {
-      await ledger.append(outcome.evaluation.record);
+      if (leasedLedger && heartbeat) {
+        const activeLease = await heartbeat.ensure();
+        await leasedLedger.appendWithLease(outcome.evaluation.record, activeLease, Date.now());
+      } else {
+        await (ledger as ResearchLedger).append(outcome.evaluation.record);
+      }
     }
 
     const evaluations = successfulOutcomes.map((outcome) => outcome.evaluation);
@@ -252,8 +310,11 @@ export async function runResearchSearch(params: {
 
     const validationBacktest = selected.backtest;
     const finalHoldoutBacktest = await quant.backtest(selectedStrategy, finalHoldoutCandles);
+    await heartbeat?.ensure();
 
-    const records = await ledger.list(options.runId);
+    const records = (await ledger.list(options.runId)).filter(
+      (record) => !leasedLedger || record.trialId.startsWith(trialPrefix)
+    );
     const evidence = buildResearchEvidence(records, selected.trialId, {
       annualization,
       purgedCv: {
@@ -265,14 +326,24 @@ export async function runResearchSearch(params: {
     });
     const researchValidation = await quant.validateResearch(finalHoldoutBacktest, evidence);
 
-    await ledger.finishRun(options.runId, {
-      status: "COMPLETED",
-      updatedAt: monotonicNow(runCreatedAt),
-      selectedTrialId: selected.trialId,
-    });
+    if (leasedLedger && heartbeat) {
+      const finalLease = await heartbeat.stopAndRenew();
+      await leasedLedger.finishRunWithLease(finalLease, {
+        status: "COMPLETED",
+        updatedAt: monotonicNow(runCreatedAt),
+        selectedTrialId: selected.trialId,
+      });
+    } else {
+      await (ledger as ResearchLedger).finishRun(options.runId, {
+        status: "COMPLETED",
+        updatedAt: monotonicNow(runCreatedAt),
+        selectedTrialId: selected.trialId,
+      });
+    }
 
     return {
       runId: options.runId,
+      ...(leaseGeneration ? { leaseGeneration } : {}),
       selectedTrialId: selected.trialId,
       selectedStrategy,
       trialEvaluations: evaluations,
@@ -285,7 +356,12 @@ export async function runResearchSearch(params: {
       researchValidation,
     };
   } catch (error) {
-    await markRunFailedBestEffort(ledger, options.runId, runCreatedAt, error);
+    if (leasedLedger && heartbeat) {
+      const lastLease = await heartbeat.stopBestEffort();
+      await markLeasedRunFailedBestEffort(leasedLedger, lastLease, runCreatedAt, error);
+    } else {
+      await markRunFailedBestEffort(ledger as ResearchLedger, options.runId, runCreatedAt, error);
+    }
     throw error;
   }
 }
@@ -362,6 +438,73 @@ export function equityReturns(equityCurve: readonly number[]): number[] {
   return returns;
 }
 
+function startLeaseHeartbeat(
+  ledger: LeaseCapableResearchLedger,
+  initialLease: ResearchRunLease,
+  leaseMs: number,
+  heartbeatMs: number
+): LeaseHeartbeatController {
+  let current = initialLease;
+  let stopped = false;
+  let failure: Error | undefined;
+  let chain = Promise.resolve();
+
+  const pulse = (): void => {
+    if (stopped || failure) return;
+    chain = chain
+      .then(async () => {
+        if (stopped || failure) return;
+        const renewed = await ledger.heartbeatRunLease(current, {
+          now: Date.now(),
+          leaseMs,
+        });
+        if (!renewed) throw new Error(`Research run lease lost or expired: ${current.runId}`);
+        current = renewed;
+      })
+      .catch((error) => {
+        failure = error instanceof Error ? error : new Error(String(error));
+      });
+  };
+
+  const timer = setInterval(pulse, heartbeatMs);
+  const maybeTimer = timer as unknown as { unref?: () => void };
+  maybeTimer.unref?.();
+
+  const ensure = async (): Promise<ResearchRunLease> => {
+    await chain;
+    if (failure) throw failure;
+    return current;
+  };
+
+  return {
+    current: () => current,
+    ensure,
+    async stopAndRenew(): Promise<ResearchRunLease> {
+      stopped = true;
+      clearInterval(timer);
+      await chain;
+      if (failure) throw failure;
+      const renewed = await ledger.heartbeatRunLease(current, {
+        now: Date.now(),
+        leaseMs,
+      });
+      if (!renewed) throw new Error(`Research run lease lost or expired: ${current.runId}`);
+      current = renewed;
+      return current;
+    },
+    async stopBestEffort(): Promise<ResearchRunLease> {
+      stopped = true;
+      clearInterval(timer);
+      try {
+        await chain;
+      } catch {
+        // Failure is recorded separately; return the last known lease for a fenced failure write.
+      }
+      return current;
+    },
+  };
+}
+
 async function markRunFailedBestEffort(
   ledger: ResearchLedger,
   runId: string,
@@ -377,9 +520,35 @@ async function markRunFailedBestEffort(
       error: errorMessage(error).slice(0, 4_000),
     });
   } catch {
-    // Preserve the original research failure. Durable ledger outages are surfaced
-    // by the caller's normal infrastructure monitoring rather than masking it.
+    // Preserve the original research failure.
   }
+}
+
+async function markLeasedRunFailedBestEffort(
+  ledger: LeaseCapableResearchLedger,
+  lease: ResearchRunLease,
+  runCreatedAt: number,
+  error: unknown
+): Promise<void> {
+  try {
+    await ledger.finishRunWithLease(lease, {
+      status: "FAILED",
+      updatedAt: monotonicNow(runCreatedAt),
+      error: errorMessage(error).slice(0, 4_000),
+    });
+  } catch {
+    // A reclaimed/lost lease must not be able to mark the newer worker's run failed.
+  }
+}
+
+function isLeaseCapableResearchLedger(
+  ledger: ResearchLedgerLike
+): ledger is LeaseCapableResearchLedger {
+  const candidate = ledger as Partial<LeaseCapableResearchLedger>;
+  return typeof candidate.claimRunLease === "function"
+    && typeof candidate.heartbeatRunLease === "function"
+    && typeof candidate.appendWithLease === "function"
+    && typeof candidate.finishRunWithLease === "function";
 }
 
 function compareTrialEvaluations(a: TrialEvaluation, b: TrialEvaluation): number {
@@ -393,6 +562,20 @@ function compareTrialEvaluations(a: TrialEvaluation, b: TrialEvaluation): number
 
 function positiveFinite(value: number | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function integerInRange(
+  value: number | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+  name: string
+): number {
+  const resolved = value ?? fallback;
+  if (!Number.isFinite(resolved) || !Number.isInteger(resolved) || resolved < minimum || resolved > maximum) {
+    throw new Error(`${name} must be an integer in [${minimum}, ${maximum}]`);
+  }
+  return resolved;
 }
 
 function monotonicNow(floor: number): number {
