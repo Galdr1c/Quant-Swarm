@@ -14,7 +14,10 @@ import type {
   ValidationReport,
 } from "@quant-swarm/shared";
 
-declare const process: { env: Record<string, string | undefined> };
+declare const process: {
+  env: Record<string, string | undefined>;
+  exitCode?: number;
+};
 
 const ENGINE_URL = process.env.QUANT_ENGINE_URL ?? "http://localhost:8420";
 
