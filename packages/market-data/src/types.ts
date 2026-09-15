@@ -1,6 +1,6 @@
 import type { OHLCV } from "@quant-swarm/shared";
 
-export type ExchangeName = "binance" | "bybit" | "hyperliquid" | "synthetic";
+export type ExchangeName = "tradingview" | "binance" | "bybit" | "hyperliquid" | "synthetic";
 
 export interface MarketCandle extends OHLCV {
   exchange: ExchangeName;

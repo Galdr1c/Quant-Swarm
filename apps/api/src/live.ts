@@ -2,9 +2,10 @@ import {
   BinanceMarketDataProvider,
   BybitMarketDataProvider,
   HyperliquidMarketDataProvider,
-  type CandleSubscription,
+  TradingViewMarketDataProvider,
   type StreamingMarketDataProvider,
 } from "@quant-swarm/market-data";
+import { parseSubscriptions, parseTradingViewSession } from "./live-config.js";
 import { HttpScannerClient, MultiSymbolLiveScanner } from "./live-scanner.js";
 
 declare const process: {
@@ -13,16 +14,15 @@ declare const process: {
   exitCode?: number;
 };
 
-function parseSubscriptions(raw: string): CandleSubscription[] {
-  return raw.split(",").map((item) => {
-    const [symbol, timeframe] = item.trim().split(":");
-    if (!symbol || !timeframe) throw new Error(`Invalid MARKET_SUBSCRIPTIONS item: ${item}`);
-    return { symbol: symbol.toUpperCase(), timeframe };
-  });
-}
-
 function createProvider(name: string): StreamingMarketDataProvider {
   switch (name.toLowerCase()) {
+    case "tradingview":
+      return new TradingViewMarketDataProvider({
+        token: process.env.TRADINGVIEW_SESSION_ID,
+        signature: process.env.TRADINGVIEW_SESSION_SIGNATURE,
+        session: parseTradingViewSession(process.env.TRADINGVIEW_MARKET_SESSION),
+        includeCurrentHistoricalBar: false,
+      });
     case "binance":
       return new BinanceMarketDataProvider();
     case "bybit":
@@ -37,9 +37,9 @@ function createProvider(name: string): StreamingMarketDataProvider {
 }
 
 async function main(): Promise<void> {
-  const providerName = process.env.MARKET_PROVIDER ?? "binance";
+  const providerName = process.env.MARKET_PROVIDER ?? "tradingview";
   const subscriptions = parseSubscriptions(
-    process.env.MARKET_SUBSCRIPTIONS ?? "BTCUSDT:15m,ETHUSDT:15m"
+    process.env.MARKET_SUBSCRIPTIONS ?? "BINANCE:BTCUSDT:15m,NASDAQ:AAPL:15m"
   );
   const engineUrl = process.env.QUANT_ENGINE_URL ?? "http://localhost:8420";
 
