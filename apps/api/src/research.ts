@@ -6,7 +6,11 @@ import {
   type ResearchContext,
 } from "@quant-swarm/ai-orchestrator";
 import { SyntheticMarketDataProvider } from "@quant-swarm/market-data";
-import { JsonlResearchLedger } from "@quant-swarm/research-ledger";
+import {
+  JsonlResearchLedger,
+  PostgresResearchLedger,
+  type ResearchLedger,
+} from "@quant-swarm/research-ledger";
 import type { CandidateEvent, OHLCV } from "@quant-swarm/shared";
 import { HttpResearchQuantClient, runResearchSearch } from "./research-search.js";
 
@@ -65,6 +69,32 @@ function createAgents(raw: string): ResearchAgent[] {
   });
 }
 
+function createLedger(): { ledger: ResearchLedger; backend: "jsonl" | "postgres" } {
+  const backend = (process.env.RESEARCH_LEDGER_BACKEND ?? "jsonl").trim().toLowerCase();
+  if (backend === "jsonl") {
+    return {
+      backend,
+      ledger: new JsonlResearchLedger(
+        process.env.RESEARCH_LEDGER_PATH ?? ".data/research-ledger.jsonl"
+      ),
+    };
+  }
+  if (backend === "postgres") {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString?.trim()) {
+      throw new Error("DATABASE_URL is required when RESEARCH_LEDGER_BACKEND=postgres");
+    }
+    return {
+      backend,
+      ledger: new PostgresResearchLedger({
+        connectionString,
+        schema: process.env.RESEARCH_POSTGRES_SCHEMA ?? "quant_swarm",
+      }),
+    };
+  }
+  throw new Error(`Unsupported RESEARCH_LEDGER_BACKEND: ${backend}`);
+}
+
 function parseOpenAIEffort(value: string | undefined): "low" | "medium" | "high" | "xhigh" | "max" {
   if (value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") return value;
   return "high";
@@ -112,66 +142,70 @@ async function main(): Promise<void> {
   };
 
   const runId = process.env.RESEARCH_RUN_ID ?? `research-${Date.now()}`;
-  const ledger = new JsonlResearchLedger(
-    process.env.RESEARCH_LEDGER_PATH ?? ".data/research-ledger.jsonl"
-  );
+  const { ledger, backend } = createLedger();
   const quant = new HttpResearchQuantClient(ENGINE_URL);
-  const result = await runResearchSearch({
-    event,
-    context,
-    agents,
-    regimeCalibrationCandles: discovery,
-    validationCandles: validation,
-    finalHoldoutCandles: finalHoldout,
-    ledger,
-    quant,
-    options: {
-      runId,
-      annualization: 365.25 * 24 * 4,
-      coordinator: {
-        maxConcurrency: Number(process.env.RESEARCH_MAX_CONCURRENCY ?? 3),
-        timeoutMs: Number(process.env.RESEARCH_AGENT_TIMEOUT_MS ?? 90_000),
-      },
-      purgedCv: {
-        nSplits: Number(process.env.RESEARCH_CV_SPLITS ?? 5),
-        purgeBars: Number(process.env.RESEARCH_PURGE_BARS ?? 1),
-        embargoBars: Number(process.env.RESEARCH_EMBARGO_BARS ?? 1),
-      },
-      regime: {
-        lookback: Number(process.env.RESEARCH_REGIME_LOOKBACK ?? 48),
-        volatilityQuantile: Number(process.env.RESEARCH_REGIME_VOL_QUANTILE ?? 0.67),
-        trendQuantile: Number(process.env.RESEARCH_REGIME_TREND_QUANTILE ?? 0.67),
-      },
-    },
-  });
 
-  console.log(`[research] run=${result.runId}`);
-  console.log(`[research] candidate=${event.type} score=${event.score.toFixed(3)}`);
-  console.log(`[research] successfulTrials=${result.trialEvaluations.length} agentFailures=${result.agentFailures.length} evaluationFailures=${result.evaluationFailures.length}`);
-  console.log(`[research] regimeCalibration vol>=${result.regimeCalibration.volatilityHighBps.toFixed(3)}bps trendEfficiency>=${result.regimeCalibration.trendEfficiencyHigh.toFixed(3)}`);
-  console.log(`[research] selected=${result.selectedStrategy.id} validationSharpe=${result.validationBacktest.sharpe.toFixed(3)}`);
-  console.log(`[research] finalHoldoutSharpe=${result.finalHoldoutBacktest.sharpe.toFixed(3)} verdict=${result.researchValidation.overallVerdict}`);
-  console.log("[research] observation/research only; no orders were created");
+  try {
+    const result = await runResearchSearch({
+      event,
+      context,
+      agents,
+      regimeCalibrationCandles: discovery,
+      validationCandles: validation,
+      finalHoldoutCandles: finalHoldout,
+      ledger,
+      quant,
+      options: {
+        runId,
+        annualization: 365.25 * 24 * 4,
+        coordinator: {
+          maxConcurrency: Number(process.env.RESEARCH_MAX_CONCURRENCY ?? 3),
+          timeoutMs: Number(process.env.RESEARCH_AGENT_TIMEOUT_MS ?? 90_000),
+        },
+        purgedCv: {
+          nSplits: Number(process.env.RESEARCH_CV_SPLITS ?? 5),
+          purgeBars: Number(process.env.RESEARCH_PURGE_BARS ?? 1),
+          embargoBars: Number(process.env.RESEARCH_EMBARGO_BARS ?? 1),
+        },
+        regime: {
+          lookback: Number(process.env.RESEARCH_REGIME_LOOKBACK ?? 48),
+          volatilityQuantile: Number(process.env.RESEARCH_REGIME_VOL_QUANTILE ?? 0.67),
+          trendQuantile: Number(process.env.RESEARCH_REGIME_TREND_QUANTILE ?? 0.67),
+        },
+      },
+    });
 
-  console.log(JSON.stringify({
-    runId: result.runId,
-    selectedTrialId: result.selectedTrialId,
-    selectedStrategyId: result.selectedStrategy.id,
-    regimeCalibration: result.regimeCalibration,
-    validation: {
-      sharpe: result.validationBacktest.sharpe,
-      netReturn: result.validationBacktest.netReturn,
-      maxDrawdown: result.validationBacktest.maxDrawdown,
-    },
-    finalHoldout: {
-      sharpe: result.finalHoldoutBacktest.sharpe,
-      netReturn: result.finalHoldoutBacktest.netReturn,
-      maxDrawdown: result.finalHoldoutBacktest.maxDrawdown,
-    },
-    researchValidation: result.researchValidation,
-    agentFailures: result.agentFailures,
-    evaluationFailures: result.evaluationFailures,
-  }, null, 2));
+    console.log(`[research] run=${result.runId} ledger=${backend}`);
+    console.log(`[research] candidate=${event.type} score=${event.score.toFixed(3)}`);
+    console.log(`[research] successfulTrials=${result.trialEvaluations.length} agentFailures=${result.agentFailures.length} evaluationFailures=${result.evaluationFailures.length}`);
+    console.log(`[research] regimeCalibration vol>=${result.regimeCalibration.volatilityHighBps.toFixed(3)}bps trendEfficiency>=${result.regimeCalibration.trendEfficiencyHigh.toFixed(3)}`);
+    console.log(`[research] selected=${result.selectedStrategy.id} validationSharpe=${result.validationBacktest.sharpe.toFixed(3)}`);
+    console.log(`[research] finalHoldoutSharpe=${result.finalHoldoutBacktest.sharpe.toFixed(3)} verdict=${result.researchValidation.overallVerdict}`);
+    console.log("[research] observation/research only; no orders were created");
+
+    console.log(JSON.stringify({
+      runId: result.runId,
+      selectedTrialId: result.selectedTrialId,
+      selectedStrategyId: result.selectedStrategy.id,
+      ledgerBackend: backend,
+      regimeCalibration: result.regimeCalibration,
+      validation: {
+        sharpe: result.validationBacktest.sharpe,
+        netReturn: result.validationBacktest.netReturn,
+        maxDrawdown: result.validationBacktest.maxDrawdown,
+      },
+      finalHoldout: {
+        sharpe: result.finalHoldoutBacktest.sharpe,
+        netReturn: result.finalHoldoutBacktest.netReturn,
+        maxDrawdown: result.finalHoldoutBacktest.maxDrawdown,
+      },
+      researchValidation: result.researchValidation,
+      agentFailures: result.agentFailures,
+      evaluationFailures: result.evaluationFailures,
+    }, null, 2));
+  } finally {
+    await ledger.close?.();
+  }
 }
 
 main().catch((error: unknown) => {
