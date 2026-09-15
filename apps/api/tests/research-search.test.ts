@@ -11,6 +11,9 @@ import {
   runResearchSearch,
   type BacktestWithEquity,
   type PsrEvidence,
+  type RegimeCalibration,
+  type RegimeCalibrationOptions,
+  type RegimeReturnEvidence,
   type ResearchQuantClient,
 } from "../src/research-search.js";
 
@@ -66,6 +69,7 @@ class FakeQuantClient implements ResearchQuantClient {
   readonly validationSharpes: Record<string, number> = { s1: 0.8, s2: 1.5, s3: 1.1 };
   finalStrategyId?: string;
   evidenceSeen?: unknown;
+  calibrationCandlesSeen?: OHLCV[];
 
   async backtest(input: StrategyDefinition, rows: OHLCV[]): Promise<BacktestWithEquity> {
     const isFinal = rows[0].timestamp >= 2_000_000;
@@ -109,6 +113,43 @@ class FakeQuantClient implements ResearchQuantClient {
     };
   }
 
+  async calibrateRegimes(
+    rows: OHLCV[],
+    _options?: RegimeCalibrationOptions
+  ): Promise<RegimeCalibration> {
+    this.calibrationCandlesSeen = rows;
+    return {
+      lookback: 5,
+      volatilityHighBps: 35,
+      trendEfficiencyHigh: 0.8,
+      volatilityQuantile: 0.67,
+      trendQuantile: 0.67,
+    };
+  }
+
+  async regimeReturns(
+    equityCurve: number[],
+    _rows: OHLCV[],
+    calibration: RegimeCalibration
+  ): Promise<RegimeReturnEvidence> {
+    const returns: number[] = [];
+    for (let i = 1; i < equityCurve.length; i += 1) {
+      returns.push(equityCurve[i] / equityCurve[i - 1] - 1);
+    }
+    const buckets = {
+      trending: returns.filter((_, index) => index % 3 === 0),
+      ranging: returns.filter((_, index) => index % 3 === 1),
+      volatile: returns.filter((_, index) => index % 3 === 2),
+    };
+    return {
+      regimeReturns: buckets,
+      counts: Object.fromEntries(Object.entries(buckets).map(([name, values]) => [name, values.length])),
+      labeledObservations: returns.length,
+      unlabeledObservations: 0,
+      calibration,
+    };
+  }
+
   async validateResearch(
     _result: BacktestWithEquity,
     evidence: any
@@ -116,27 +157,29 @@ class FakeQuantClient implements ResearchQuantClient {
     this.evidenceSeen = evidence;
     return {
       strategyId: this.finalStrategyId ?? "unknown",
-      checks: [{ name: "test", verdict: "REVIEW" }],
-      overallVerdict: "REVIEW",
+      checks: [{ name: "test", verdict: "PASS" }],
+      overallVerdict: "PASS",
     };
   }
 }
 
 describe("runResearchSearch", () => {
-  it("selects on validation OOS, evaluates final holdout separately and builds ledger evidence", async () => {
+  it("calibrates regimes on discovery, selects on OOS and builds complete ledger evidence", async () => {
     const ledger = new MemoryResearchLedger();
     const quant = new FakeQuantClient();
+    const calibration = candles(0);
     const validation = candles(1_000_000);
     const holdout = candles(2_000_000);
 
     const result = await runResearchSearch({
       event,
-      context: { recentCandles: candles(0).slice(-20) },
+      context: { recentCandles: calibration.slice(-20) },
       agents: [
         new FixedAgent("agent-1", "s1"),
         new FixedAgent("agent-2", "s2"),
         new FixedAgent("agent-3", "s3"),
       ],
+      regimeCalibrationCandles: calibration,
       validationCandles: validation,
       finalHoldoutCandles: holdout,
       ledger,
@@ -148,6 +191,8 @@ describe("runResearchSearch", () => {
       },
     });
 
+    expect(quant.calibrationCandlesSeen?.[0].timestamp).toBe(calibration[0].timestamp);
+    expect(result.regimeCalibration.lookback).toBe(5);
     expect(result.selectedStrategy.id).toBe("s2");
     expect(result.validationBacktest.sharpe).toBe(1.5);
     expect(quant.finalStrategyId).toBe("s2");
@@ -157,11 +202,13 @@ describe("runResearchSearch", () => {
     expect(records).toHaveLength(3);
     expect(records.every((row) => (row.metrics.outOfSampleReturns?.length ?? 0) > 2)).toBe(true);
     expect(records.every((row) => row.metrics.pValue !== undefined)).toBe(true);
+    expect(records.every((row) => Object.keys(row.metrics.regimeReturns ?? {}).length === 3)).toBe(true);
 
     expect(result.evidence.trialSharpes).toHaveLength(3);
     expect(result.evidence.candidatePValues).toHaveLength(3);
     expect(result.evidence.cscvReturns?.[0]).toHaveLength(3);
+    expect(Object.keys(result.evidence.regimeReturns ?? {})).toEqual(["trending", "ranging", "volatile"]);
     expect(result.evidence.purgedCv?.nObservations).toBe(validation.length);
-    expect(result.researchValidation.overallVerdict).toBe("REVIEW");
+    expect(result.researchValidation.overallVerdict).toBe("PASS");
   });
 });
