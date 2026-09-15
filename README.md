@@ -18,6 +18,8 @@ Bounded AI Research Orchestrator
 Strategy DSL (validated JSON)
         ↓
 Validation/OOS Backtests → Append-only Research Ledger
+        ↓                         ↓
+Discovery-calibrated Regimes → Regime Return Evidence
         ↓
 Selected Strategy → Separate Final Holdout
         ↓
@@ -30,12 +32,12 @@ Shadow / Paper / Live
 
 ### Core principles
 
-- **LLM never computes performance** — indicators, market-intelligence metrics, backtests, p-values, and validation are deterministic.
+- **LLM never computes performance** — indicators, market-intelligence metrics, backtests, p-values, regime evidence, and validation are deterministic.
 - **LLM never executes orders** — research agents have no broker/exchange execution authority.
 - **No bot grades its own output** — research, backtest, validation, and risk are separated.
 - **Risk engine is sovereign** — AI cannot bypass exposure limits or the kill switch.
 - **Strategy DSL** — agents produce validated strategy JSON instead of arbitrary executable code.
-- **Research history is auditable** — successful evaluated trials are appended to a research ledger with provider/model provenance and numeric evidence.
+- **Research history is auditable** — evaluated trials are appended to a research ledger with provider/model provenance and numeric evidence.
 - **Shadow first** — live trading is disabled by default.
 
 ## Project structure
@@ -54,11 +56,11 @@ quant-swarm/
 │  └─ ai-orchestrator/        # Mock/OpenAI/Kimi agents + bounded coordinator
 ├─ services/
 │  └─ quant-engine/
-│     ├─ src/api/             # FastAPI scan/backtest/stats/validate service
+│     ├─ src/api/             # FastAPI scan/backtest/stats/regime/validate service
 │     ├─ src/backtest/        # Deterministic execution simulator
 │     ├─ src/indicators/      # Local indicators + rating approximation
 │     ├─ src/scanners/        # Prior-window anomaly scanners
-│     ├─ src/validation/      # Baseline + research-grade validation
+│     ├─ src/validation/      # Baseline + research-grade + regime validation
 │     └─ tests/
 └─ .github/workflows/ci.yml
 ```
@@ -119,7 +121,7 @@ Implemented deterministic controls:
 
 Advanced evidence is intentionally not inferred from one winning backtest. If DSR/PBO/FDR/regime/CV evidence is missing, `/validate/research` reports the affected checks as `REVIEW`; it never converts missing evidence into a pass.
 
-The quant engine also exposes `/stats/psr` so one-sided candidate p-values used by FDR are computed in Python from the actual equity curve instead of being fabricated by an agent or TypeScript orchestration code.
+The quant engine exposes `/stats/psr` so one-sided candidate p-values used by FDR are computed in Python from the actual equity curve instead of being fabricated by an agent or TypeScript orchestration code.
 
 Methodology references include Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), and Bailey, Borwein, López de Prado & Zhu, *The Probability of Backtest Overfitting* (2017). The implementation is transparent and locally testable rather than delegating these calculations to an AI agent.
 
@@ -129,14 +131,14 @@ Milestone 5 connects multi-agent hypothesis generation to the deterministic rese
 
 ### Research agents
 
-`@quant-swarm/ai-orchestrator` now includes:
+`@quant-swarm/ai-orchestrator` includes:
 
 - `OpenAIResearchAgent` — GPT-6 Astra through the Responses API, Structured JSON output, configurable reasoning effort, and `store: false`.
 - `KimiResearchAgent` — Kimi K3 through the OpenAI-compatible Chat Completions API with JSON mode and `low` / `high` / `max` reasoning effort.
 - `MockResearchAgent` — deterministic, parameter-varied templates used by CI and local smoke tests.
 - `MultiAgentResearchCoordinator` — bounded concurrency, per-agent timeout/cancellation, and failure isolation.
 
-Provider output is always passed through the local Strategy DSL validator before it can enter backtesting. Agents cannot submit backtest results, p-values, risk approvals, or orders.
+Provider output is always passed through the local Strategy DSL validator before it can enter backtesting. Agents cannot submit accepted backtest results, p-values, risk approvals, or orders.
 
 ### Append-only research ledger
 
@@ -148,11 +150,11 @@ Provider output is always passed through the local Strategy DSL validator before
 - Sharpe, return, drawdown, profit factor and expectancy
 - deterministic PSR p-value
 - explicit validation/OOS return path
-- optional regime evidence and final validation verdict
+- deterministic per-regime return paths
 
-The JSONL implementation stores research metadata and numeric evidence only. API keys, authorization headers, raw provider requests, and hidden reasoning/chain-of-thought are not written to the ledger.
+The JSONL implementation stores research metadata and numeric evidence only. API keys, authorization headers, raw provider requests, and hidden reasoning/chain-of-thought are not written to the ledger. OOS and regime paths are rejected if they contain non-finite values.
 
-The ledger can build `trialSharpes`, candidate p-values, selected-trial index, and an observations × trials CSCV matrix directly for `/validate/research`. Incomplete evidence is omitted rather than padded.
+The ledger can build `trialSharpes`, candidate p-values, selected-trial index, an observations × trials CSCV matrix, and selected-trial regime evidence directly for `/validate/research`. Incomplete evidence is omitted rather than padded.
 
 ### Three-way research discipline
 
@@ -160,17 +162,41 @@ The `research:run` path separates data usage:
 
 ```text
 Discovery slice
-  → candidate + agent context only
+  → candidate + agent context
+  → calibrate market-regime thresholds
 Validation/OOS slice
   → compare every agent strategy
-  → PSR p-value + OOS return path → ledger
+  → PSR p-value + OOS return path + regime paths → ledger
   → deterministic strategy selection
 Final holdout slice
   → selected strategy only
   → /validate/research with ledger evidence
 ```
 
-This avoids selecting and finally judging the winning strategy on the exact same slice. The current smoke path still reports `REVIEW` when required regime evidence is absent; missing evidence is never promoted to `PASS`.
+This avoids selecting and finally judging the winning strategy on the exact same slice.
+
+## Milestone 6 — deterministic regime robustness evidence
+
+Milestone 6 removes the remaining manual regime-evidence gap from the research-search path.
+
+The quant engine now derives two rolling market features from close prices:
+
+- **realized volatility** — sample standard deviation of rolling log returns, expressed in basis points per observation
+- **directional efficiency** — absolute net displacement divided by total absolute price path length, bounded to `[0, 1]`
+
+`POST /regimes/calibrate` computes fixed volatility and directional-efficiency thresholds from the earlier discovery sample using configurable quantiles. Those thresholds are then frozen. Validation/OOS data never recalibrates them.
+
+`POST /stats/regime-returns` applies the frozen thresholds to a strategy equity curve and groups its returns into:
+
+- `volatile` — realized volatility is above the calibrated high-volatility threshold
+- `trending` — not volatile, and directional efficiency is above the calibrated trend threshold
+- `ranging` — the remaining labeled observations
+
+Volatility has precedence so a strongly directional stress episode is stress-tested in the `volatile` bucket rather than being hidden inside `trending`.
+
+The research executor calibrates once on discovery data, computes regime returns for every validation/OOS trial in Python, persists those paths in the research ledger, and automatically supplies the selected trial's three-bucket evidence to `/validate/research`. The first `lookback` observations in each evaluation slice are deliberately unlabeled because there is insufficient local history; they are not backfilled with future information.
+
+The default `0.67` quantiles and 48-bar lookback are development calibration defaults, not trading signals or universal market constants.
 
 ## Quick start
 
@@ -193,7 +219,7 @@ Run the original synthetic pipeline:
 pnpm run pipeline
 ```
 
-Run the Milestone 5 research smoke with deterministic mock agents:
+Run the research smoke with deterministic mock agents:
 
 ```bash
 RESEARCH_PROVIDERS=mock,mock,mock pnpm run research:run
@@ -215,23 +241,6 @@ Run the Milestone 2 live candle scanner:
 ```bash
 MARKET_PROVIDER=binance \
 MARKET_SUBSCRIPTIONS=BTCUSDT:15m,ETHUSDT:15m \
-pnpm run live:scan
-```
-
-For Bybit candles:
-
-```bash
-MARKET_PROVIDER=bybit \
-BYBIT_CATEGORY=linear \
-MARKET_SUBSCRIPTIONS=BTCUSDT:15m,ETHUSDT:15m \
-pnpm run live:scan
-```
-
-For Hyperliquid candles use native coin names:
-
-```bash
-MARKET_PROVIDER=hyperliquid \
-MARKET_SUBSCRIPTIONS=BTC:15m,ETH:15m \
 pnpm run live:scan
 ```
 
@@ -265,7 +274,7 @@ Market-data and market-intelligence adapters require no trading API keys. Resear
 
 - Long-only backtester.
 - Purged K-fold is currently bar-horizon based; event-time label-interval purging/CPCV path construction can be added when supervised ML labels enter the platform.
-- Regime return evidence is not yet produced automatically by the research-search executor, so regime robustness can remain `REVIEW` until a deterministic regime classifier is wired in.
+- Regime thresholds are deterministic but relative to a calibration sample; production research should monitor calibration drift across assets/timeframes rather than assume one threshold set is permanent.
 - JSONL research ledger is intended for a single research worker/process; production multi-worker deployment needs a durable transactional ledger (for example Postgres).
 - Provider adapters generate one hypothesis per configured agent call; adaptive budget allocation and candidate-aware fan-out are not implemented yet.
 - Milestone 3 intelligence thresholds are baseline development defaults and are not yet regime-adaptive.

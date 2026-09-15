@@ -40,9 +40,9 @@ function trial(overrides: Partial<ResearchTrialRecord> = {}): ResearchTrialRecor
       pValue: 0.01,
       outOfSampleReturns: [0.01, -0.005, 0.008, 0.004],
       regimeReturns: {
-        bull: [0.01, 0.02],
-        bear: [0.002, -0.001],
-        sideways: [0.001, 0.002],
+        trending: [0.01, 0.02],
+        ranging: [0.002, -0.001],
+        volatile: [0.001, 0.002],
       },
     },
     ...overrides,
@@ -72,10 +72,20 @@ describe("research ledgers", () => {
     expect(run1).toHaveLength(1);
     expect(run1[0].provenance.model).toBe("gpt-6-astra");
   });
+
+  it("rejects non-finite OOS and regime return evidence", () => {
+    expect(() => trial({
+      metrics: { sharpe: 1, outOfSampleReturns: [0.01, Number.NaN] },
+    })).toThrow(/outOfSampleReturns/);
+
+    expect(() => trial({
+      metrics: { sharpe: 1, regimeReturns: { volatile: [0.01, Number.POSITIVE_INFINITY] } },
+    })).toThrow(/regimeReturns\.volatile/);
+  });
 });
 
 describe("buildResearchEvidence", () => {
-  it("derives DSR/FDR/CSCV evidence without inventing missing values", () => {
+  it("derives DSR/FDR/CSCV/regime evidence without inventing missing values", () => {
     const records = [
       trial(),
       trial({
@@ -105,7 +115,8 @@ describe("buildResearchEvidence", () => {
       [0.008, 0.004],
       [0.004, 0.001],
     ]);
-    expect(evidence.regimeReturns?.bull).toEqual([0.01, 0.02]);
+    expect(evidence.regimeReturns?.trending).toEqual([0.01, 0.02]);
+    expect(evidence.regimeReturns?.volatile).toEqual([0.001, 0.002]);
     expect(evidence.purgedCv?.embargoBars).toBe(4);
   });
 

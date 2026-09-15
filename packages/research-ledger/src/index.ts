@@ -11,6 +11,7 @@ export interface ResearchTrialMetrics {
   pValue?: number;
   /** Explicit out-of-sample returns only. Never substitute in-sample returns. */
   outOfSampleReturns?: number[];
+  /** Strategy returns grouped by deterministic market regime. */
   regimeReturns?: Record<string, number[]>;
 }
 
@@ -222,6 +223,24 @@ export function validateRecord(value: unknown): asserts value is ResearchTrialRe
   }
   if (record.metrics.pValue !== undefined && !finiteProbability(record.metrics.pValue)) {
     throw new Error("metrics.pValue must be in [0, 1]");
+  }
+  if (record.metrics.outOfSampleReturns !== undefined) {
+    validateReturnPath(record.metrics.outOfSampleReturns, "metrics.outOfSampleReturns");
+  }
+  if (record.metrics.regimeReturns !== undefined) {
+    if (!record.metrics.regimeReturns || typeof record.metrics.regimeReturns !== "object") {
+      throw new Error("metrics.regimeReturns must be an object");
+    }
+    for (const [regime, path] of Object.entries(record.metrics.regimeReturns)) {
+      if (!regime.trim()) throw new Error("metrics.regimeReturns keys must be non-empty");
+      validateReturnPath(path, `metrics.regimeReturns.${regime}`);
+    }
+  }
+}
+
+function validateReturnPath(path: unknown, name: string): void {
+  if (!Array.isArray(path) || !path.every((value) => typeof value === "number" && Number.isFinite(value))) {
+    throw new Error(`${name} must contain only finite numeric returns`);
   }
 }
 

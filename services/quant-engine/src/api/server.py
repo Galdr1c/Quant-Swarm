@@ -9,10 +9,15 @@ from pydantic import BaseModel, Field
 from ..backtest.engine import BacktestConfig, run_backtest
 from ..scanners.anomaly_scanner import scan_ohlcv
 from ..validation.advanced import equity_returns, probabilistic_sharpe_ratio, sharpe_ratio
+from ..validation.regimes import (
+    RegimeCalibration,
+    calibrate_regime_thresholds,
+    strategy_regime_returns,
+)
 from ..validation.research_validator import validate_research
 from ..validation.validator import validate_backtest
 
-app = FastAPI(title="Quant Swarm Engine", version="0.3.0")
+app = FastAPI(title="Quant Swarm Engine", version="0.4.0")
 
 
 class Candle(BaseModel):
@@ -52,6 +57,27 @@ class PsrRequest(BaseModel):
     equityCurve: list[float]
     benchmarkSharpe: float = 0.0
     annualization: float = Field(default=1.0, gt=0.0)
+
+
+class RegimeCalibrationRequest(BaseModel):
+    candles: list[Candle]
+    lookback: int = Field(default=48, ge=3, le=5000)
+    volatilityQuantile: float = Field(default=0.67, ge=0.5, le=0.95)
+    trendQuantile: float = Field(default=0.67, ge=0.5, le=0.95)
+
+
+class RegimeThresholds(BaseModel):
+    lookback: int = Field(ge=3, le=5000)
+    volatilityHighBps: float = Field(ge=0.0)
+    trendEfficiencyHigh: float = Field(ge=0.0, le=1.0)
+    volatilityQuantile: float = Field(default=0.67, ge=0.5, le=0.95)
+    trendQuantile: float = Field(default=0.67, ge=0.5, le=0.95)
+
+
+class RegimeReturnsRequest(BaseModel):
+    candles: list[Candle]
+    equityCurve: list[float]
+    calibration: RegimeThresholds
 
 
 def _arrays(candles: list[Candle]) -> tuple[np.ndarray, ...]:
@@ -165,6 +191,50 @@ def psr(req: PsrRequest) -> dict[str, Any]:
         "observations": int(len(returns)),
         "benchmarkSharpe": float(req.benchmarkSharpe),
         "annualization": float(req.annualization),
+    }
+
+
+@app.post("/regimes/calibrate")
+def calibrate_regimes(req: RegimeCalibrationRequest) -> dict[str, Any]:
+    """Calibrate fixed market-regime thresholds on an earlier discovery sample."""
+    _, _, _, _, close, _ = _arrays(req.candles)
+    try:
+        calibration = calibrate_regime_thresholds(
+            close,
+            lookback=req.lookback,
+            volatility_quantile=req.volatilityQuantile,
+            trend_quantile=req.trendQuantile,
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return calibration.to_dict()
+
+
+@app.post("/stats/regime-returns")
+def regime_returns(req: RegimeReturnsRequest) -> dict[str, Any]:
+    """Group a strategy equity path by market regimes using fixed thresholds."""
+    _, _, _, _, close, _ = _arrays(req.candles)
+    calibration = RegimeCalibration(
+        lookback=req.calibration.lookback,
+        volatility_high_bps=req.calibration.volatilityHighBps,
+        trend_efficiency_high=req.calibration.trendEfficiencyHigh,
+        volatility_quantile=req.calibration.volatilityQuantile,
+        trend_quantile=req.calibration.trendQuantile,
+    )
+    try:
+        grouped = strategy_regime_returns(req.equityCurve, close, calibration)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    counts = {name: len(values) for name, values in grouped.items()}
+    labeled = sum(counts.values())
+    possible_returns = max(len(req.equityCurve) - 1, 0)
+    return {
+        "regimeReturns": grouped,
+        "counts": counts,
+        "labeledObservations": labeled,
+        "unlabeledObservations": max(possible_returns - labeled, 0),
+        "calibration": calibration.to_dict(),
     }
 
 
