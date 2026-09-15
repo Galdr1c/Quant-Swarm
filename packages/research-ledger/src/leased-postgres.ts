@@ -216,53 +216,74 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
     await this.ready;
 
     const hash = recordHash(record);
-    const result = await this.pool.query(
-      `INSERT INTO ${this.table("research_trials")}
-        (run_id, trial_id, created_at_ms, strategy_id, strategy_fingerprint,
-         provider, model, prompt_version, record_hash, record)
-       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb
-         FROM ${this.table("research_runs")}
-        WHERE run_id = $1
-          AND status = 'RUNNING'
-          AND lease_owner = $11
-          AND lease_token = $12
-          AND lease_generation = $13
-          AND lease_expires_at_ms > $14
-       ON CONFLICT (run_id, trial_id) DO NOTHING
-       RETURNING trial_id`,
-      [
-        record.runId,
-        record.trialId,
-        record.createdAt,
-        record.strategyId,
-        record.strategyFingerprint ?? null,
-        record.provenance.provider,
-        record.provenance.model,
-        record.provenance.promptVersion,
-        hash,
-        JSON.stringify(record),
-        lease.workerId,
-        lease.token,
-        lease.generation,
-        now,
-      ]
-    );
-    if (result.rowCount === 1) return "inserted";
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const active = await client.query(
+        `SELECT lease_generation
+           FROM ${this.table("research_runs")}
+          WHERE run_id = $1
+            AND status = 'RUNNING'
+            AND lease_owner = $2
+            AND lease_token = $3
+            AND lease_generation = $4
+            AND lease_expires_at_ms > $5
+          FOR UPDATE`,
+        [lease.runId, lease.workerId, lease.token, lease.generation, now]
+      );
+      if (active.rowCount !== 1) {
+        throw new Error(`Research run lease lost or expired: ${lease.runId}`);
+      }
 
-    const active = await this.isLeaseActive(lease, now);
-    if (!active) throw new Error(`Research run lease lost or expired: ${lease.runId}`);
+      const inserted = await client.query(
+        `INSERT INTO ${this.table("research_trials")}
+          (run_id, trial_id, created_at_ms, strategy_id, strategy_fingerprint,
+           provider, model, prompt_version, record_hash, record)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+         ON CONFLICT (run_id, trial_id) DO NOTHING
+         RETURNING trial_id`,
+        [
+          record.runId,
+          record.trialId,
+          record.createdAt,
+          record.strategyId,
+          record.strategyFingerprint ?? null,
+          record.provenance.provider,
+          record.provenance.model,
+          record.provenance.promptVersion,
+          hash,
+          JSON.stringify(record),
+        ]
+      );
+      if (inserted.rowCount === 1) {
+        await client.query("COMMIT");
+        return "inserted";
+      }
 
-    const existing = await this.pool.query(
-      `SELECT record_hash
-         FROM ${this.table("research_trials")}
-        WHERE run_id = $1 AND trial_id = $2`,
-      [record.runId, record.trialId]
-    );
-    if (existing.rowCount === 1) {
-      if (String(existing.rows[0].record_hash) === hash) return "duplicate";
-      throw new Error(`Conflicting research trial already exists: ${record.runId}/${record.trialId}`);
+      const existing = await client.query(
+        `SELECT record_hash
+           FROM ${this.table("research_trials")}
+          WHERE run_id = $1 AND trial_id = $2`,
+        [record.runId, record.trialId]
+      );
+      if (existing.rowCount === 1 && String(existing.rows[0].record_hash) === hash) {
+        await client.query("COMMIT");
+        return "duplicate";
+      }
+      if (existing.rowCount === 1) {
+        throw new Error(`Conflicting research trial already exists: ${record.runId}/${record.trialId}`);
+      }
+      throw new Error(`Could not append research trial: ${record.runId}/${record.trialId}`);
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Preserve the original fenced-write failure.
+      }
+      throw error;
+    } finally {
+      client.release();
     }
-    throw new Error(`Could not append research trial: ${record.runId}/${record.trialId}`);
   }
 
   async getRun(runId: string): Promise<ResearchRunRecord | undefined> {
@@ -313,21 +334,6 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
   async close(): Promise<void> {
     await this.ready;
     if (this.ownsPool) await this.pool.end();
-  }
-
-  private async isLeaseActive(lease: ResearchRunLease, now: number): Promise<boolean> {
-    const result = await this.pool.query(
-      `SELECT 1
-         FROM ${this.table("research_runs")}
-        WHERE run_id = $1
-          AND status = 'RUNNING'
-          AND lease_owner = $2
-          AND lease_token = $3
-          AND lease_generation = $4
-          AND lease_expires_at_ms > $5`,
-      [lease.runId, lease.workerId, lease.token, lease.generation, now]
-    );
-    return result.rowCount === 1;
   }
 
   private async initialize(): Promise<void> {
