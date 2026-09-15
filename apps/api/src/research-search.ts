@@ -202,7 +202,7 @@ export async function runResearchSearch(params: {
     leaseGeneration = lease.generation;
     trialPrefix = `${options.runId}:g${lease.generation}:`;
   } else {
-    const claimed = await ledger.claimRun(options.runId, runCreatedAt);
+    const claimed = await (ledger as ResearchLedger).claimRun(options.runId, runCreatedAt);
     if (!claimed) throw new Error(`Research runId already exists in ledger: ${options.runId}`);
   }
 
