@@ -17,7 +17,7 @@ Bounded AI Research Orchestrator
         ↓
 Strategy DSL (validated JSON)
         ↓
-Validation/OOS Backtests → Append-only Research Ledger
+Validation/OOS Backtests → Transactional Research Ledger
         ↓                         ↓
 Discovery-calibrated Regimes → Regime Return Evidence
         ↓
@@ -37,7 +37,8 @@ Shadow / Paper / Live
 - **No bot grades its own output** — research, backtest, validation, and risk are separated.
 - **Risk engine is sovereign** — AI cannot bypass exposure limits or the kill switch.
 - **Strategy DSL** — agents produce validated strategy JSON instead of arbitrary executable code.
-- **Research history is auditable** — evaluated trials are appended to a research ledger with provider/model provenance and numeric evidence.
+- **Research history is auditable** — evaluated trials retain provider/model provenance, the exact validated Strategy DSL snapshot, a canonical SHA-256 fingerprint, and deterministic numeric evidence.
+- **Run identity is protected** — durable ledgers atomically claim run IDs and make identical trial retries idempotent while rejecting conflicting payloads.
 - **Shadow first** — live trading is disabled by default.
 
 ## Project structure
@@ -51,7 +52,7 @@ quant-swarm/
 │  ├─ strategy-schema/        # Zod strategy DSL
 │  ├─ event-bus/              # Typed in-process event bus
 │  ├─ market-data/            # Candle + market-intelligence providers
-│  ├─ research-ledger/        # Append-only trial history + validation evidence builder
+│  ├─ research-ledger/        # JSONL/Postgres run + trial ledger and evidence builder
 │  ├─ risk-contracts/         # AI-independent risk engine
 │  └─ ai-orchestrator/        # Mock/OpenAI/Kimi agents + bounded coordinator
 ├─ services/
@@ -96,69 +97,47 @@ All adapters normalize data into the same `MarketCandle` contract. Streaming use
 
 Milestone 3 adds a normalized derivatives/microstructure snapshot without putting an LLM in the calculation path.
 
-Normalized fields include best bid/ask, midpoint/spread, quote-notional depth and imbalance, funding, open interest, mark/index-oracle basis, liquidation notional where a public feed exists, and source latency metadata.
+Normalized fields include best bid/ask, midpoint/spread, quote-notional depth and imbalance, funding, open interest, mark/index-oracle basis, liquidation notional where the venue exposes a public feed, and source latency metadata.
 
 Implemented public-data sources:
 
-- **Binance USDⓈ-M Futures** — `/fapi/v1/depth`, `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest`, plus `<symbol>@forceOrder` liquidation streams on the current futures market WebSocket route.
-- **Bybit V5 linear/inverse** — `/v5/market/orderbook`, `/v5/market/tickers`, plus `allLiquidation.{symbol}` WebSocket topics. The default configuration is linear contracts.
+- **Binance USDⓈ-M Futures** — `/fapi/v1/depth`, `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest`, plus `<symbol>@forceOrder` liquidation streams.
+- **Bybit V5 linear/inverse** — `/v5/market/orderbook`, `/v5/market/tickers`, plus `allLiquidation.{symbol}` WebSocket topics.
 - **Hyperliquid** — `l2Book` plus `metaAndAssetCtxs`; funding, open interest, mark price and oracle price are joined by asset index. No equivalent public market-wide liquidation feed is fabricated; those fields remain `null`.
 
 `MarketIntelligenceScanner` deterministically emits `ORDERBOOK_IMBALANCE`, `FUNDING_EXTREME`, `OPEN_INTEREST_EXPANSION`, `BASIS_DISLOCATION`, `SPREAD_WIDENING`, `LIQUIDATION_SPIKE`, and rolling-return `VOLATILITY_EXPANSION` candidates with per exchange/symbol/type cooldowns.
 
 ## Milestone 4 — research-grade statistical validation
 
-The original `/validate` endpoint remains the stable baseline gate. `/validate/research` adds research-process evidence that is required once the platform starts searching many strategies and parameter combinations.
+The original `/validate` endpoint remains the stable baseline gate. `/validate/research` adds research-process evidence required once the platform searches many strategies and parameter combinations.
 
 Implemented deterministic controls:
 
 - **Probabilistic Sharpe Ratio (PSR)** with finite-sample skew/kurtosis adjustment.
-- **Deflated Sharpe Ratio (DSR)** using the observed distribution of trial Sharpes to raise the benchmark after multiple strategy searches.
+- **Deflated Sharpe Ratio (DSR)** using the observed distribution of trial Sharpes.
 - **Benjamini–Hochberg FDR** correction for candidate p-values.
 - **CSCV / Probability of Backtest Overfitting (PBO)** from an observations × strategy-trials return matrix.
 - **Purged + embargoed K-fold plans** for fixed-horizon time-series labels.
 - **Regime robustness** from per-regime return series and the fraction of regimes with positive Sharpe.
 
-Advanced evidence is intentionally not inferred from one winning backtest. If DSR/PBO/FDR/regime/CV evidence is missing, `/validate/research` reports the affected checks as `REVIEW`; it never converts missing evidence into a pass.
+Missing DSR/PBO/FDR/regime/CV evidence is explicitly `REVIEW`; it is never silently promoted to `PASS`. The quant engine exposes `/stats/psr` so candidate p-values are computed from actual equity curves rather than generated by an AI agent.
 
-The quant engine exposes `/stats/psr` so one-sided candidate p-values used by FDR are computed in Python from the actual equity curve instead of being fabricated by an agent or TypeScript orchestration code.
-
-Methodology references include Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), and Bailey, Borwein, López de Prado & Zhu, *The Probability of Backtest Overfitting* (2017). The implementation is transparent and locally testable rather than delegating these calculations to an AI agent.
+Methodology references include Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), and Bailey, Borwein, López de Prado & Zhu, *The Probability of Backtest Overfitting* (2017).
 
 ## Milestone 5 — research ledger + production agent adapters
-
-Milestone 5 connects multi-agent hypothesis generation to the deterministic research stack without giving the models authority over statistics or execution.
-
-### Research agents
 
 `@quant-swarm/ai-orchestrator` includes:
 
 - `OpenAIResearchAgent` — GPT-6 Astra through the Responses API, Structured JSON output, configurable reasoning effort, and `store: false`.
-- `KimiResearchAgent` — Kimi K3 through the OpenAI-compatible Chat Completions API with JSON mode and `low` / `high` / `max` reasoning effort.
-- `MockResearchAgent` — deterministic, parameter-varied templates used by CI and local smoke tests.
+- `KimiResearchAgent` — Kimi K3 through the OpenAI-compatible Chat Completions API with JSON mode.
+- `MockResearchAgent` — deterministic parameter-varied templates for CI/local smoke tests.
 - `MultiAgentResearchCoordinator` — bounded concurrency, per-agent timeout/cancellation, and failure isolation.
 
-Provider output is always passed through the local Strategy DSL validator before it can enter backtesting. Agents cannot submit accepted backtest results, p-values, risk approvals, or orders.
+Provider output is always passed through the local Strategy DSL validator before backtesting. Agents cannot submit accepted backtest results, p-values, risk approvals, or orders.
 
-### Append-only research ledger
-
-`@quant-swarm/research-ledger` records each successfully evaluated trial with:
-
-- run/trial IDs and candidate event
-- strategy ID and agent confidence
-- provider, model, prompt version and optional response ID
-- Sharpe, return, drawdown, profit factor and expectancy
-- deterministic PSR p-value
-- explicit validation/OOS return path
-- deterministic per-regime return paths
-
-The JSONL implementation stores research metadata and numeric evidence only. API keys, authorization headers, raw provider requests, and hidden reasoning/chain-of-thought are not written to the ledger. OOS and regime paths are rejected if they contain non-finite values.
-
-The ledger can build `trialSharpes`, candidate p-values, selected-trial index, an observations × trials CSCV matrix, and selected-trial regime evidence directly for `/validate/research`. Incomplete evidence is omitted rather than padded.
+The research ledger records provider/model/prompt provenance, performance metrics, deterministic PSR p-values, explicit validation/OOS return paths, and regime return paths. It can construct `trialSharpes`, FDR p-values, selected-trial index, CSCV matrices, and selected-trial regime evidence for `/validate/research` without padding missing evidence.
 
 ### Three-way research discipline
-
-The `research:run` path separates data usage:
 
 ```text
 Discovery slice
@@ -177,26 +156,55 @@ This avoids selecting and finally judging the winning strategy on the exact same
 
 ## Milestone 6 — deterministic regime robustness evidence
 
-Milestone 6 removes the remaining manual regime-evidence gap from the research-search path.
+The quant engine derives rolling realized volatility and directional efficiency from close prices. `POST /regimes/calibrate` learns fixed thresholds from the earlier discovery sample only; validation/OOS data never recalibrates them.
 
-The quant engine now derives two rolling market features from close prices:
+`POST /stats/regime-returns` applies the frozen thresholds and groups strategy returns into:
 
-- **realized volatility** — sample standard deviation of rolling log returns, expressed in basis points per observation
-- **directional efficiency** — absolute net displacement divided by total absolute price path length, bounded to `[0, 1]`
+- `volatile` — realized volatility above the calibrated threshold
+- `trending` — not volatile and directional efficiency above the trend threshold
+- `ranging` — remaining labeled observations
 
-`POST /regimes/calibrate` computes fixed volatility and directional-efficiency thresholds from the earlier discovery sample using configurable quantiles. Those thresholds are then frozen. Validation/OOS data never recalibrates them.
+Volatility has precedence so a directional stress episode is stress-tested in the `volatile` bucket instead of being hidden inside `trending`. The first `lookback` observations remain unlabeled because there is insufficient local history; they are not backfilled with future information.
 
-`POST /stats/regime-returns` applies the frozen thresholds to a strategy equity curve and groups its returns into:
+The default `0.67` quantiles and 48-bar lookback are development defaults, not universal trading thresholds.
 
-- `volatile` — realized volatility is above the calibrated high-volatility threshold
-- `trending` — not volatile, and directional efficiency is above the calibrated trend threshold
-- `ranging` — the remaining labeled observations
+## Milestone 7 — transactional research ledger
 
-Volatility has precedence so a strongly directional stress episode is stress-tested in the `volatile` bucket rather than being hidden inside `trending`.
+Milestone 7 hardens research persistence for multi-worker deployments.
 
-The research executor calibrates once on discovery data, computes regime returns for every validation/OOS trial in Python, persists those paths in the research ledger, and automatically supplies the selected trial's three-bucket evidence to `/validate/research`. The first `lookback` observations in each evaluation slice are deliberately unlabeled because there is insufficient local history; they are not backfilled with future information.
+### Atomic run lifecycle
 
-The default `0.67` quantiles and 48-bar lookback are development calibration defaults, not trading signals or universal market constants.
+Every search must atomically claim its `runId` before provider calls or backtests begin. The ledger tracks `RUNNING`, `COMPLETED`, and `FAILED` states, including the selected trial for completed runs. A second worker cannot silently start the same run.
+
+### Idempotent trials
+
+Trials use `(runId, trialId)` identity. Replaying the exact same canonical record returns `duplicate` and does not insert a second row. Reusing that identity with a different payload is rejected as an integrity conflict.
+
+### Strategy audit snapshot
+
+Every newly evaluated trial persists:
+
+- the exact validated `StrategyDefinition` JSON used for backtesting
+- a canonical SHA-256 fingerprint computed after recursively sorting object keys
+- the existing provider/model/prompt provenance and deterministic statistical evidence
+
+This makes a historical trial reconstructable even if an agent later changes prompts or generates a strategy with the same human-readable name.
+
+### PostgreSQL backend
+
+`PostgresResearchLedger` creates a configurable schema with `research_runs` and `research_trials` tables. Primary keys enforce run/trial identities at the database boundary, JSONB stores the auditable record, and strategy ID/fingerprint indexes support later analysis.
+
+Use it with:
+
+```bash
+RESEARCH_LEDGER_BACKEND=postgres \
+DATABASE_URL=postgresql://quant_swarm:password@localhost:5432/quant_swarm \
+RESEARCH_POSTGRES_SCHEMA=quant_swarm \
+RESEARCH_PROVIDERS=mock,mock,mock \
+pnpm run research:run
+```
+
+The JSONL backend remains available for lightweight local development. CI runs a real PostgreSQL service, tests competing run claims/idempotent trial retries, and executes the complete research smoke against the Postgres backend.
 
 ## Quick start
 
@@ -219,7 +227,7 @@ Run the original synthetic pipeline:
 pnpm run pipeline
 ```
 
-Run the research smoke with deterministic mock agents:
+Run research with deterministic mock agents and the local JSONL ledger:
 
 ```bash
 RESEARCH_PROVIDERS=mock,mock,mock pnpm run research:run
@@ -234,9 +242,9 @@ KIMI_API_KEY=... \
 pnpm run research:run
 ```
 
-This command is research-only. It does not place orders or enable live execution.
+These commands are research-only. They do not place orders or enable live execution.
 
-Run the Milestone 2 live candle scanner:
+Run the live candle scanner:
 
 ```bash
 MARKET_PROVIDER=binance \
@@ -244,7 +252,7 @@ MARKET_SUBSCRIPTIONS=BTCUSDT:15m,ETHUSDT:15m \
 pnpm run live:scan
 ```
 
-Run the Milestone 3 observation-only market-intelligence scanner:
+Run the observation-only market-intelligence scanner:
 
 ```bash
 INTELLIGENCE_PROVIDER=binance \
@@ -275,7 +283,8 @@ Market-data and market-intelligence adapters require no trading API keys. Resear
 - Long-only backtester.
 - Purged K-fold is currently bar-horizon based; event-time label-interval purging/CPCV path construction can be added when supervised ML labels enter the platform.
 - Regime thresholds are deterministic but relative to a calibration sample; production research should monitor calibration drift across assets/timeframes rather than assume one threshold set is permanent.
-- JSONL research ledger is intended for a single research worker/process; production multi-worker deployment needs a durable transactional ledger (for example Postgres).
+- Postgres run claims are durable and atomic, but abandoned `RUNNING` runs do not yet have lease/heartbeat expiry and automatic safe reclaim after a worker crash.
+- Database schema creation is automatic; a versioned migration system is not implemented yet.
 - Provider adapters generate one hypothesis per configured agent call; adaptive budget allocation and candidate-aware fan-out are not implemented yet.
 - Milestone 3 intelligence thresholds are baseline development defaults and are not yet regime-adaptive.
 - Order-book snapshots are polling-based; persistent local L2 books from snapshot+delta streams are a later optimization.
