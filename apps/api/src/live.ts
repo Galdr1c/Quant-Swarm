@@ -3,9 +3,9 @@ import {
   BybitMarketDataProvider,
   HyperliquidMarketDataProvider,
   TradingViewMarketDataProvider,
-  type CandleSubscription,
   type StreamingMarketDataProvider,
 } from "@quant-swarm/market-data";
+import { parseSubscriptions, parseTradingViewSession } from "./live-config.js";
 import { HttpScannerClient, MultiSymbolLiveScanner } from "./live-scanner.js";
 
 declare const process: {
@@ -13,20 +13,6 @@ declare const process: {
   on(event: string, handler: () => void): void;
   exitCode?: number;
 };
-
-export function parseSubscriptions(raw: string): CandleSubscription[] {
-  return raw.split(",").map((item) => {
-    const value = item.trim();
-    const separator = value.lastIndexOf(":");
-    if (separator <= 0 || separator === value.length - 1) {
-      throw new Error(`Invalid MARKET_SUBSCRIPTIONS item: ${item}`);
-    }
-    const symbol = value.slice(0, separator).trim();
-    const timeframe = value.slice(separator + 1).trim();
-    if (!symbol || !timeframe) throw new Error(`Invalid MARKET_SUBSCRIPTIONS item: ${item}`);
-    return { symbol: symbol.toUpperCase(), timeframe };
-  });
-}
 
 function createProvider(name: string): StreamingMarketDataProvider {
   switch (name.toLowerCase()) {
@@ -48,13 +34,6 @@ function createProvider(name: string): StreamingMarketDataProvider {
     default:
       throw new Error(`Unsupported MARKET_PROVIDER: ${name}`);
   }
-}
-
-function parseTradingViewSession(value: string | undefined): "regular" | "extended" | undefined {
-  if (!value) return undefined;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "regular" || normalized === "extended") return normalized;
-  throw new Error("TRADINGVIEW_MARKET_SESSION must be regular or extended");
 }
 
 async function main(): Promise<void> {
