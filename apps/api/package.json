@@ -1,0 +1,23 @@
+{
+  "name": "@quant-swarm/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/pipeline.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run --passWithNoTests",
+    "pipeline": "pnpm -r --filter @quant-swarm/shared --filter @quant-swarm/strategy-schema --filter @quant-swarm/market-data --filter @quant-swarm/risk-contracts --filter @quant-swarm/ai-orchestrator build && tsc && node dist/pipeline.js"
+  },
+  "dependencies": {
+    "@quant-swarm/shared": "workspace:*",
+    "@quant-swarm/strategy-schema": "workspace:*",
+    "@quant-swarm/market-data": "workspace:*",
+    "@quant-swarm/risk-contracts": "workspace:*",
+    "@quant-swarm/ai-orchestrator": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
