@@ -7,9 +7,9 @@
 ```text
 Exchange REST/WebSocket
         ↓
-Normalized Market Data
+Normalized Market Data + Market Intelligence
         ↓
-Deterministic Multi-Symbol Scanner
+Deterministic Candle / Microstructure Scanners
         ↓
 Candidate Event
         ↓
@@ -28,7 +28,7 @@ Shadow / Paper / Live
 
 ### Core principles
 
-- **LLM never computes performance** — indicators, backtests, and validation are deterministic.
+- **LLM never computes performance** — indicators, market-intelligence metrics, backtests, and validation are deterministic.
 - **LLM never executes orders** — no direct broker/exchange access from research agents.
 - **No bot grades its own output** — research, backtest, validation, and risk are separated.
 - **Risk engine is sovereign** — AI cannot bypass exposure limits or the kill switch.
@@ -40,12 +40,12 @@ Shadow / Paper / Live
 ```text
 quant-swarm/
 ├─ apps/
-│  └─ api/                    # Pipeline + observation-only live scanner
+│  └─ api/                    # Pipeline + observation-only live scanners
 ├─ packages/
-│  ├─ shared/                 # Shared contracts
+│  ├─ shared/                 # Shared contracts + candidate-event types
 │  ├─ strategy-schema/        # Zod strategy DSL
 │  ├─ event-bus/              # Typed in-process event bus
-│  ├─ market-data/            # Synthetic + Binance + Bybit + Hyperliquid
+│  ├─ market-data/            # Candle + market-intelligence providers
 │  ├─ risk-contracts/         # AI-independent risk engine
 │  └─ ai-orchestrator/        # Research-agent interface + mock agent
 ├─ services/
@@ -76,15 +76,49 @@ The backtester uses next-bar-open execution for close-confirmed signals, intraba
 
 ## Milestone 2 — live market-data foundation
 
-Implemented market-data providers:
+Implemented candle providers:
 
 - **Binance Spot** — REST `/api/v3/klines` + combined kline WebSocket streams.
 - **Bybit V5** — REST `/v5/market/kline` + `kline.{interval}.{symbol}` public WebSocket topics.
-- **Hyperliquid** — `candleSnapshot` REST info requests + `candle` WebSocket subscriptions.
+- **Hyperliquid** — `candleSnapshot` info requests + `candle` WebSocket subscriptions.
 
 All adapters normalize data into the same `MarketCandle` contract. Streaming uses reconnect with exponential backoff, best-effort REST backfill after reconnect, and timestamp deduplication so previously processed closed candles are not emitted twice.
 
-`MultiSymbolLiveScanner` maintains bounded rolling buffers per exchange/symbol/timeframe and sends only newly closed candles through the deterministic Python anomaly scanner. The live scanner is **observation-only**: it never creates or sends orders.
+`MultiSymbolLiveScanner` maintains bounded rolling buffers per exchange/symbol/timeframe and sends only newly closed candles through the deterministic Python anomaly scanner. The live candle scanner is **observation-only**: it never creates or sends orders.
+
+## Milestone 3 — market intelligence layer
+
+Milestone 3 adds a normalized derivatives/microstructure snapshot without putting an LLM in the calculation path.
+
+Normalized fields include:
+
+- best bid/ask, midpoint and spread in basis points
+- bid/ask depth in quote notional and order-book imbalance
+- funding rate and next funding time when the venue exposes it
+- open interest and estimated/open-interest quote value
+- mark price, index/oracle price and mark-index basis in basis points
+- rolling long/short liquidation notional where a public market-wide feed exists
+- source timestamp/latency metadata
+
+Implemented public-data sources:
+
+- **Binance USDⓈ-M Futures** — `/fapi/v1/depth`, `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest`, plus `<symbol>@forceOrder` liquidation streams on the current futures market WebSocket route.
+- **Bybit V5 linear/inverse** — `/v5/market/orderbook`, `/v5/market/tickers`, plus `allLiquidation.{symbol}` WebSocket topics. The default configuration is linear contracts.
+- **Hyperliquid** — `l2Book` plus `metaAndAssetCtxs`; funding, open interest, mark price and oracle price are joined by asset index. Hyperliquid does not currently expose an equivalent public market-wide liquidation stream through this adapter, so liquidation fields remain `null` rather than being fabricated.
+
+`MarketIntelligenceScanner` keeps a bounded rolling history and deterministically emits the following `CandidateEvent` types:
+
+- `ORDERBOOK_IMBALANCE`
+- `FUNDING_EXTREME`
+- `OPEN_INTEREST_EXPANSION`
+- `BASIS_DISLOCATION`
+- `SPREAD_WIDENING`
+- `LIQUIDATION_SPIKE`
+- `VOLATILITY_EXPANSION` from rolling midpoint log returns
+
+Candidate cooldown prevents the same exchange/symbol/event type from being repeatedly emitted on every poll. Thresholds are environment-configurable and should be calibrated per venue, instrument and polling frequency; the defaults are development baselines, not trading recommendations.
+
+The intelligence CLI uses only public market-data endpoints. It does not use API trading credentials and does not place orders.
 
 ## Quick start
 
@@ -107,7 +141,7 @@ Run the synthetic Milestone 1 pipeline:
 pnpm run pipeline
 ```
 
-Run the live observation-only scanner:
+Run the Milestone 2 live candle scanner:
 
 ```bash
 MARKET_PROVIDER=binance \
@@ -115,7 +149,7 @@ MARKET_SUBSCRIPTIONS=BTCUSDT:15m,ETHUSDT:15m \
 pnpm run live:scan
 ```
 
-For Bybit:
+For Bybit candles:
 
 ```bash
 MARKET_PROVIDER=bybit \
@@ -124,12 +158,37 @@ MARKET_SUBSCRIPTIONS=BTCUSDT:15m,ETHUSDT:15m \
 pnpm run live:scan
 ```
 
-For Hyperliquid use native coin names:
+For Hyperliquid candles use native coin names:
 
 ```bash
 MARKET_PROVIDER=hyperliquid \
 MARKET_SUBSCRIPTIONS=BTC:15m,ETH:15m \
 pnpm run live:scan
+```
+
+Run the Milestone 3 observation-only market-intelligence scanner:
+
+```bash
+INTELLIGENCE_PROVIDER=binance \
+INTELLIGENCE_SYMBOLS=BTCUSDT,ETHUSDT \
+pnpm run live:intelligence
+```
+
+For Bybit:
+
+```bash
+INTELLIGENCE_PROVIDER=bybit \
+BYBIT_CATEGORY=linear \
+INTELLIGENCE_SYMBOLS=BTCUSDT,ETHUSDT \
+pnpm run live:intelligence
+```
+
+For Hyperliquid:
+
+```bash
+INTELLIGENCE_PROVIDER=hyperliquid \
+INTELLIGENCE_SYMBOLS=BTC,ETH \
+pnpm run live:intelligence
 ```
 
 Run tests:
@@ -148,16 +207,18 @@ TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 ```
 
-The market-data adapters require no trading API keys. Execution APIs remain disabled. The risk engine supports explicit `reduceOnly` orders and a `KillSwitchStore` abstraction so production deployments can persist kill-switch state outside the process.
+The market-data and market-intelligence adapters require no trading API keys. Execution APIs remain disabled. The risk engine supports explicit `reduceOnly` orders and a `KillSwitchStore` abstraction so production deployments can persist kill-switch state outside the process.
 
 ## Current limitations / next milestone
 
 - Long-only backtester.
 - Baseline statistical validator only; walk-forward, purged/embargoed CV, Deflated Sharpe, multiple-testing correction, and regime robustness are still pending.
+- Milestone 3 intelligence thresholds are baseline development defaults and are not yet regime-adaptive.
+- Order-book snapshots are polling-based in Milestone 3; persistent local L2 books from snapshot+delta streams are a later optimization.
+- Liquidation coverage is venue-specific; Hyperliquid public market-wide liquidation aggregation is intentionally unavailable in the current adapter.
 - Kill-switch store defaults to in-memory; a durable production adapter is still required.
 - No broker/exchange execution adapter is enabled.
 - No OpenAI/Kimi production research adapter is enabled yet.
-- Live scanner currently processes candle-close data; order-book/funding/open-interest feeds are next.
 
 ## License
 
