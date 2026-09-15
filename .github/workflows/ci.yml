@@ -81,6 +81,10 @@ jobs:
           cat /tmp/quant-engine.log
           exit 1
       - run: pnpm run pipeline
+      - name: Run anonymous TradingView market-data smoke
+        env:
+          TRADINGVIEW_SMOKE_TIMEOUT_MS: "20000"
+        run: pnpm run tradingview:smoke
       - name: Run research smoke with Postgres ledger
         env:
           RESEARCH_PROVIDERS: mock,mock,mock
