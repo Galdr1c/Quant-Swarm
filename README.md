@@ -13,13 +13,15 @@ Deterministic Candle / Microstructure Scanners
         ↓
 Candidate Event
         ↓
-AI Research Orchestrator
+Bounded AI Research Orchestrator
         ↓
 Strategy DSL (validated JSON)
         ↓
-Deterministic Backtester
+Validation/OOS Backtests → Append-only Research Ledger
         ↓
-Baseline + Research-Grade Statistical Validation
+Selected Strategy → Separate Final Holdout
+        ↓
+Research-Grade Statistical Validation
         ↓
 Independent Risk Engine
         ↓
@@ -28,11 +30,12 @@ Shadow / Paper / Live
 
 ### Core principles
 
-- **LLM never computes performance** — indicators, market-intelligence metrics, backtests, and validation are deterministic.
-- **LLM never executes orders** — no direct broker/exchange access from research agents.
+- **LLM never computes performance** — indicators, market-intelligence metrics, backtests, p-values, and validation are deterministic.
+- **LLM never executes orders** — research agents have no broker/exchange execution authority.
 - **No bot grades its own output** — research, backtest, validation, and risk are separated.
 - **Risk engine is sovereign** — AI cannot bypass exposure limits or the kill switch.
 - **Strategy DSL** — agents produce validated strategy JSON instead of arbitrary executable code.
+- **Research history is auditable** — successful evaluated trials are appended to a research ledger with provider/model provenance and numeric evidence.
 - **Shadow first** — live trading is disabled by default.
 
 ## Project structure
@@ -40,17 +43,18 @@ Shadow / Paper / Live
 ```text
 quant-swarm/
 ├─ apps/
-│  └─ api/                    # Pipeline + observation-only live scanners
+│  └─ api/                    # Pipeline, live scanners, research-search executor
 ├─ packages/
 │  ├─ shared/                 # Shared contracts + candidate-event types
 │  ├─ strategy-schema/        # Zod strategy DSL
 │  ├─ event-bus/              # Typed in-process event bus
 │  ├─ market-data/            # Candle + market-intelligence providers
+│  ├─ research-ledger/        # Append-only trial history + validation evidence builder
 │  ├─ risk-contracts/         # AI-independent risk engine
-│  └─ ai-orchestrator/        # Research-agent interface + mock agent
+│  └─ ai-orchestrator/        # Mock/OpenAI/Kimi agents + bounded coordinator
 ├─ services/
 │  └─ quant-engine/
-│     ├─ src/api/             # FastAPI scan/backtest/validate service
+│     ├─ src/api/             # FastAPI scan/backtest/stats/validate service
 │     ├─ src/backtest/        # Deterministic execution simulator
 │     ├─ src/indicators/      # Local indicators + rating approximation
 │     ├─ src/scanners/        # Prior-window anomaly scanners
@@ -102,7 +106,7 @@ Implemented public-data sources:
 
 ## Milestone 4 — research-grade statistical validation
 
-The original `/validate` endpoint remains the stable baseline gate. A new `/validate/research` endpoint adds research-process evidence that is required once the platform starts searching many strategies and parameter combinations.
+The original `/validate` endpoint remains the stable baseline gate. `/validate/research` adds research-process evidence that is required once the platform starts searching many strategies and parameter combinations.
 
 Implemented deterministic controls:
 
@@ -115,43 +119,58 @@ Implemented deterministic controls:
 
 Advanced evidence is intentionally not inferred from one winning backtest. If DSR/PBO/FDR/regime/CV evidence is missing, `/validate/research` reports the affected checks as `REVIEW`; it never converts missing evidence into a pass.
 
-Example research-validation request:
-
-```json
-{
-  "result": {
-    "strategyId": "candidate-42",
-    "totalTrades": 80,
-    "sharpe": 1.6,
-    "maxDrawdown": 8.0,
-    "profitFactor": 1.5,
-    "expectancy": 0.18,
-    "equityCurve": [100000, 100120, 100090, 100240]
-  },
-  "evidence": {
-    "annualization": 35040,
-    "trialSharpes": [0.4, 0.7, 1.1, 1.6],
-    "candidatePValues": [0.20, 0.08, 0.03, 0.004],
-    "selectedTrialIndex": 3,
-    "cscvReturns": [[0.001, 0.002], [-0.001, 0.001]],
-    "regimeReturns": {
-      "bull": [0.01, 0.005, -0.002],
-      "bear": [0.002, -0.001, 0.003],
-      "sideways": [0.001, 0.0, 0.002]
-    },
-    "purgedCv": {
-      "nObservations": 1500,
-      "nSplits": 5,
-      "purgeBars": 4,
-      "embargoBars": 4
-    }
-  }
-}
-```
-
-The small matrices in documentation are schematic only; production DSR/PBO evidence should come from the full search ledger and out-of-sample return paths.
+The quant engine also exposes `/stats/psr` so one-sided candidate p-values used by FDR are computed in Python from the actual equity curve instead of being fabricated by an agent or TypeScript orchestration code.
 
 Methodology references include Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), and Bailey, Borwein, López de Prado & Zhu, *The Probability of Backtest Overfitting* (2017). The implementation is transparent and locally testable rather than delegating these calculations to an AI agent.
+
+## Milestone 5 — research ledger + production agent adapters
+
+Milestone 5 connects multi-agent hypothesis generation to the deterministic research stack without giving the models authority over statistics or execution.
+
+### Research agents
+
+`@quant-swarm/ai-orchestrator` now includes:
+
+- `OpenAIResearchAgent` — GPT-6 Astra through the Responses API, Structured JSON output, configurable reasoning effort, and `store: false`.
+- `KimiResearchAgent` — Kimi K3 through the OpenAI-compatible Chat Completions API with JSON mode and `low` / `high` / `max` reasoning effort.
+- `MockResearchAgent` — deterministic, parameter-varied templates used by CI and local smoke tests.
+- `MultiAgentResearchCoordinator` — bounded concurrency, per-agent timeout/cancellation, and failure isolation.
+
+Provider output is always passed through the local Strategy DSL validator before it can enter backtesting. Agents cannot submit backtest results, p-values, risk approvals, or orders.
+
+### Append-only research ledger
+
+`@quant-swarm/research-ledger` records each successfully evaluated trial with:
+
+- run/trial IDs and candidate event
+- strategy ID and agent confidence
+- provider, model, prompt version and optional response ID
+- Sharpe, return, drawdown, profit factor and expectancy
+- deterministic PSR p-value
+- explicit validation/OOS return path
+- optional regime evidence and final validation verdict
+
+The JSONL implementation stores research metadata and numeric evidence only. API keys, authorization headers, raw provider requests, and hidden reasoning/chain-of-thought are not written to the ledger.
+
+The ledger can build `trialSharpes`, candidate p-values, selected-trial index, and an observations × trials CSCV matrix directly for `/validate/research`. Incomplete evidence is omitted rather than padded.
+
+### Three-way research discipline
+
+The `research:run` path separates data usage:
+
+```text
+Discovery slice
+  → candidate + agent context only
+Validation/OOS slice
+  → compare every agent strategy
+  → PSR p-value + OOS return path → ledger
+  → deterministic strategy selection
+Final holdout slice
+  → selected strategy only
+  → /validate/research with ledger evidence
+```
+
+This avoids selecting and finally judging the winning strategy on the exact same slice. The current smoke path still reports `REVIEW` when required regime evidence is absent; missing evidence is never promoted to `PASS`.
 
 ## Quick start
 
@@ -168,11 +187,28 @@ Start the deterministic quant engine:
 pnpm run dev:engine
 ```
 
-Run the synthetic pipeline:
+Run the original synthetic pipeline:
 
 ```bash
 pnpm run pipeline
 ```
+
+Run the Milestone 5 research smoke with deterministic mock agents:
+
+```bash
+RESEARCH_PROVIDERS=mock,mock,mock pnpm run research:run
+```
+
+Use Astra + Kimi research agents after setting their API keys:
+
+```bash
+RESEARCH_PROVIDERS=openai,kimi \
+OPENAI_API_KEY=... \
+KIMI_API_KEY=... \
+pnpm run research:run
+```
+
+This command is research-only. It does not place orders or enable live execution.
 
 Run the Milestone 2 live candle scanner:
 
@@ -207,23 +243,6 @@ INTELLIGENCE_SYMBOLS=BTCUSDT,ETHUSDT \
 pnpm run live:intelligence
 ```
 
-For Bybit:
-
-```bash
-INTELLIGENCE_PROVIDER=bybit \
-BYBIT_CATEGORY=linear \
-INTELLIGENCE_SYMBOLS=BTCUSDT,ETHUSDT \
-pnpm run live:intelligence
-```
-
-For Hyperliquid:
-
-```bash
-INTELLIGENCE_PROVIDER=hyperliquid \
-INTELLIGENCE_SYMBOLS=BTC,ETH \
-pnpm run live:intelligence
-```
-
 Run tests:
 
 ```bash
@@ -240,19 +259,20 @@ TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 ```
 
-The market-data and market-intelligence adapters require no trading API keys. Execution APIs remain disabled. The risk engine supports explicit `reduceOnly` orders and a `KillSwitchStore` abstraction so production deployments can persist kill-switch state outside the process.
+Market-data and market-intelligence adapters require no trading API keys. Research-provider keys are scoped to hypothesis generation and are never persisted to the research ledger. Exchange execution APIs remain disabled. The risk engine supports explicit `reduceOnly` orders and a `KillSwitchStore` abstraction so production deployments can persist kill-switch state outside the process.
 
 ## Current limitations / next milestone
 
 - Long-only backtester.
 - Purged K-fold is currently bar-horizon based; event-time label-interval purging/CPCV path construction can be added when supervised ML labels enter the platform.
-- Research evidence collection is not yet persisted in a strategy-search ledger; DSR/PBO/FDR inputs must currently be supplied to `/validate/research`.
+- Regime return evidence is not yet produced automatically by the research-search executor, so regime robustness can remain `REVIEW` until a deterministic regime classifier is wired in.
+- JSONL research ledger is intended for a single research worker/process; production multi-worker deployment needs a durable transactional ledger (for example Postgres).
+- Provider adapters generate one hypothesis per configured agent call; adaptive budget allocation and candidate-aware fan-out are not implemented yet.
 - Milestone 3 intelligence thresholds are baseline development defaults and are not yet regime-adaptive.
 - Order-book snapshots are polling-based; persistent local L2 books from snapshot+delta streams are a later optimization.
 - Liquidation coverage is venue-specific; Hyperliquid public market-wide liquidation aggregation is intentionally unavailable in the current adapter.
 - Kill-switch store defaults to in-memory; a durable production adapter is still required.
 - No broker/exchange execution adapter is enabled.
-- No OpenAI/Kimi production research adapter is enabled yet.
 
 ## License
 

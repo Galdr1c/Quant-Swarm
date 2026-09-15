@@ -1,3 +1,4 @@
+from src.api.server import PsrRequest, psr
 from src.validation.validator import validate_backtest
 
 
@@ -41,3 +42,17 @@ def test_validation_rejects_bad_drawdown_and_expectancy():
         }
     )
     assert report.overall_verdict == "FAIL"
+
+
+def test_psr_endpoint_returns_one_sided_p_value_from_equity_curve():
+    equity = [100.0]
+    for i in range(1, 80):
+        # Positive drift with deterministic variation; enough observations for PSR.
+        step = 0.002 if i % 5 else -0.0005
+        equity.append(equity[-1] * (1.0 + step))
+
+    result = psr(PsrRequest(equityCurve=equity, annualization=365.25 * 24 * 4))
+    assert result["observations"] == len(equity) - 1
+    assert 0.0 <= result["pValue"] <= 1.0
+    assert abs(result["pValue"] - (1.0 - result["probability"])) < 1e-7
+    assert result["sharpe"] > 0
