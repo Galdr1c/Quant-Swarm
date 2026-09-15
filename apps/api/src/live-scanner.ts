@@ -19,6 +19,7 @@ export interface MultiSymbolScannerOptions {
 
 export class MultiSymbolLiveScanner {
   private readonly buffers = new Map<string, OHLCV[]>();
+  private readonly latestClosedTimestamp = new Map<string, number>();
   private stream?: CandleStream;
   private readonly bufferSize: number;
   private readonly zThreshold: number;
@@ -45,7 +46,11 @@ export class MultiSymbolLiveScanner {
         sub.timeframe,
         this.bufferSize
       );
-      this.buffers.set(this.key(this.provider.name, sub.symbol, sub.timeframe), history.slice(-this.bufferSize));
+      const key = this.key(this.provider.name, sub.symbol, sub.timeframe);
+      const buffer = history.slice(-this.bufferSize);
+      this.buffers.set(key, buffer);
+      const last = buffer.at(-1);
+      if (last) this.latestClosedTimestamp.set(key, last.timestamp);
     }
 
     this.stream = this.provider.subscribeCandles(subscriptions, async (candle) => {
@@ -65,6 +70,9 @@ export class MultiSymbolLiveScanner {
 
   private async onClosedCandle(candle: MarketCandle): Promise<void> {
     const key = this.key(candle.exchange, candle.symbol, candle.timeframe);
+    const lastSeen = this.latestClosedTimestamp.get(key);
+    if (lastSeen !== undefined && candle.timestamp <= lastSeen) return;
+
     const buffer = [...(this.buffers.get(key) ?? [])];
     const plain: OHLCV = {
       timestamp: candle.timestamp,
@@ -75,11 +83,10 @@ export class MultiSymbolLiveScanner {
       volume: candle.volume,
     };
 
-    const existing = buffer.findIndex((x) => x.timestamp === plain.timestamp);
-    if (existing >= 0) buffer[existing] = plain;
-    else buffer.push(plain);
+    buffer.push(plain);
     buffer.sort((a, b) => a.timestamp - b.timestamp);
     this.buffers.set(key, buffer.slice(-this.bufferSize));
+    this.latestClosedTimestamp.set(key, candle.timestamp);
 
     const current = this.buffers.get(key)!;
     if (current.length < this.lookbackWindow + 1) return;
