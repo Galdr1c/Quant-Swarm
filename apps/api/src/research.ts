@@ -120,6 +120,7 @@ async function main(): Promise<void> {
     event,
     context,
     agents,
+    regimeCalibrationCandles: discovery,
     validationCandles: validation,
     finalHoldoutCandles: finalHoldout,
     ledger,
@@ -136,12 +137,18 @@ async function main(): Promise<void> {
         purgeBars: Number(process.env.RESEARCH_PURGE_BARS ?? 1),
         embargoBars: Number(process.env.RESEARCH_EMBARGO_BARS ?? 1),
       },
+      regime: {
+        lookback: Number(process.env.RESEARCH_REGIME_LOOKBACK ?? 48),
+        volatilityQuantile: Number(process.env.RESEARCH_REGIME_VOL_QUANTILE ?? 0.67),
+        trendQuantile: Number(process.env.RESEARCH_REGIME_TREND_QUANTILE ?? 0.67),
+      },
     },
   });
 
   console.log(`[research] run=${result.runId}`);
   console.log(`[research] candidate=${event.type} score=${event.score.toFixed(3)}`);
   console.log(`[research] successfulTrials=${result.trialEvaluations.length} agentFailures=${result.agentFailures.length} evaluationFailures=${result.evaluationFailures.length}`);
+  console.log(`[research] regimeCalibration vol>=${result.regimeCalibration.volatilityHighBps.toFixed(3)}bps trendEfficiency>=${result.regimeCalibration.trendEfficiencyHigh.toFixed(3)}`);
   console.log(`[research] selected=${result.selectedStrategy.id} validationSharpe=${result.validationBacktest.sharpe.toFixed(3)}`);
   console.log(`[research] finalHoldoutSharpe=${result.finalHoldoutBacktest.sharpe.toFixed(3)} verdict=${result.researchValidation.overallVerdict}`);
   console.log("[research] observation/research only; no orders were created");
@@ -150,6 +157,7 @@ async function main(): Promise<void> {
     runId: result.runId,
     selectedTrialId: result.selectedTrialId,
     selectedStrategyId: result.selectedStrategy.id,
+    regimeCalibration: result.regimeCalibration,
     validation: {
       sharpe: result.validationBacktest.sharpe,
       netReturn: result.validationBacktest.netReturn,
