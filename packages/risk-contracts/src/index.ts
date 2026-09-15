@@ -1,21 +1,12 @@
 import type { TradingMode } from "@quant-swarm/shared";
 
-// ─── Risk Limits ──────────────────────────────────────────────────────────────
-
 export interface RiskLimits {
-  /** Maximum total portfolio exposure as % of equity */
   maxPortfolioExposurePct: number;
-  /** Maximum single-symbol exposure as % of equity */
   maxSymbolExposurePct: number;
-  /** Maximum daily loss as % of equity — triggers daily halt */
   maxDailyLossPct: number;
-  /** Maximum drawdown from peak — triggers kill switch */
   maxDrawdownPct: number;
-  /** Maximum leverage allowed */
   maxLeverage: number;
 }
-
-// ─── Portfolio State ──────────────────────────────────────────────────────────
 
 export interface PortfolioState {
   equity: number;
@@ -27,8 +18,6 @@ export interface PortfolioState {
   symbolExposures: Map<string, number>;
 }
 
-// ─── Proposed Order ───────────────────────────────────────────────────────────
-
 export interface ProposedOrder {
   symbol: string;
   side: "BUY" | "SELL";
@@ -36,12 +25,15 @@ export interface ProposedOrder {
   price: number;
   leverage: number;
   strategyId: string;
+  /**
+   * A reduce-only order may decrease existing exposure but can never increase it.
+   * Direction alone (BUY/SELL) is deliberately not used to infer this intent.
+   */
+  reduceOnly?: boolean;
 }
 
-// ─── Risk Decision ────────────────────────────────────────────────────────────
-
 export type RiskDecision =
-  | { approved: true }
+  | { approved: true; projectedPortfolioExposurePct: number; projectedSymbolExposurePct: number }
   | { approved: false; reason: RiskRejectionReason };
 
 export type RiskRejectionReason =
@@ -51,96 +43,122 @@ export type RiskRejectionReason =
   | "MAX_PORTFOLIO_EXPOSURE"
   | "MAX_SYMBOL_EXPOSURE"
   | "KILL_SWITCH_ACTIVE"
-  | "LIVE_TRADING_DISABLED";
-
-// ─── Risk Engine ──────────────────────────────────────────────────────────────
+  | "LIVE_TRADING_DISABLED"
+  | "INVALID_ORDER";
 
 /**
- * Independent Risk Engine.
- *
- * No AI can override these limits. The kill switch cannot be
- * programmatically deactivated — it requires a manual restart.
+ * Persistence boundary for the sovereign kill switch.
+ * Production implementations can use Redis/Postgres/a dedicated risk daemon.
+ * No deactivate method exists by design.
  */
+export interface KillSwitchStore {
+  isActive(): boolean;
+  activate(): void;
+}
+
+export class InMemoryKillSwitchStore implements KillSwitchStore {
+  private active = false;
+
+  isActive(): boolean {
+    return this.active;
+  }
+
+  activate(): void {
+    this.active = true;
+  }
+}
+
 export class RiskEngine {
-  private limits: RiskLimits;
-  private mode: TradingMode;
-  private killSwitchActive = false;
-  private liveTradingEnabled: boolean;
+  private readonly limits: Readonly<RiskLimits>;
+  private readonly mode: TradingMode;
+  private readonly liveTradingEnabled: boolean;
+  private readonly killSwitchStore: KillSwitchStore;
 
   constructor(
     limits: RiskLimits,
     mode: TradingMode = "shadow",
-    liveTradingEnabled = false
+    liveTradingEnabled = false,
+    killSwitchStore: KillSwitchStore = new InMemoryKillSwitchStore()
   ) {
     this.limits = Object.freeze({ ...limits });
     this.mode = mode;
     this.liveTradingEnabled = liveTradingEnabled;
+    this.killSwitchStore = killSwitchStore;
   }
 
-  /**
-   * Evaluate a proposed order against risk limits.
-   * Returns approved: true only if ALL checks pass.
-   */
-  evaluateOrder(
-    order: ProposedOrder,
-    state: PortfolioState
-  ): RiskDecision {
-    // Kill switch — once active, nothing passes
-    if (this.killSwitchActive) {
+  evaluateOrder(order: ProposedOrder, state: PortfolioState): RiskDecision {
+    if (this.killSwitchStore.isActive()) {
       return { approved: false, reason: "KILL_SWITCH_ACTIVE" };
     }
 
-    // Live trading guard
     if (this.mode === "live" && !this.liveTradingEnabled) {
       return { approved: false, reason: "LIVE_TRADING_DISABLED" };
     }
 
-    // Daily loss limit
-    if (Math.abs(state.dailyPnlPct) >= this.limits.maxDailyLossPct && state.dailyPnlPct < 0) {
+    if (
+      !Number.isFinite(state.equity) ||
+      state.equity <= 0 ||
+      !Number.isFinite(order.quantity) ||
+      !Number.isFinite(order.price) ||
+      !Number.isFinite(order.leverage) ||
+      order.quantity <= 0 ||
+      order.price <= 0 ||
+      order.leverage < 0
+    ) {
+      return { approved: false, reason: "INVALID_ORDER" };
+    }
+
+    if (state.dailyPnlPct <= -this.limits.maxDailyLossPct) {
       return { approved: false, reason: "DAILY_LOSS_LIMIT" };
     }
 
-    // Max drawdown — also triggers kill switch
     if (state.drawdownPct >= this.limits.maxDrawdownPct) {
-      this.killSwitchActive = true;
+      this.killSwitchStore.activate();
       return { approved: false, reason: "MAX_DRAWDOWN" };
     }
 
-    // Leverage check
     if (order.leverage > this.limits.maxLeverage) {
       return { approved: false, reason: "MAX_LEVERAGE" };
     }
 
-    // Portfolio exposure
-    const orderExposurePct =
-      ((order.quantity * order.price) / state.equity) * 100;
-    if (
-      state.totalExposurePct + orderExposurePct >
-      this.limits.maxPortfolioExposurePct
-    ) {
+    const orderExposurePct = ((order.quantity * order.price) / state.equity) * 100;
+    const currentSymbolExposure = state.symbolExposures.get(order.symbol) ?? 0;
+
+    let projectedPortfolioExposurePct: number;
+    let projectedSymbolExposurePct: number;
+
+    if (order.reduceOnly) {
+      projectedPortfolioExposurePct = Math.max(
+        0,
+        state.totalExposurePct - Math.min(orderExposurePct, currentSymbolExposure)
+      );
+      projectedSymbolExposurePct = Math.max(0, currentSymbolExposure - orderExposurePct);
+    } else {
+      projectedPortfolioExposurePct = state.totalExposurePct + orderExposurePct;
+      projectedSymbolExposurePct = currentSymbolExposure + orderExposurePct;
+    }
+
+    if (projectedPortfolioExposurePct > this.limits.maxPortfolioExposurePct) {
       return { approved: false, reason: "MAX_PORTFOLIO_EXPOSURE" };
     }
 
-    // Symbol exposure
-    const currentSymbolExposure =
-      state.symbolExposures.get(order.symbol) ?? 0;
-    if (
-      currentSymbolExposure + orderExposurePct >
-      this.limits.maxSymbolExposurePct
-    ) {
+    if (projectedSymbolExposurePct > this.limits.maxSymbolExposurePct) {
       return { approved: false, reason: "MAX_SYMBOL_EXPOSURE" };
     }
 
-    return { approved: true };
+    return {
+      approved: true,
+      projectedPortfolioExposurePct,
+      projectedSymbolExposurePct,
+    };
   }
 
-  /** Activate the kill switch. Cannot be deactivated programmatically. */
   activateKillSwitch(): void {
-    this.killSwitchActive = true;
+    this.killSwitchStore.activate();
   }
 
   isKillSwitchActive(): boolean {
-    return this.killSwitchActive;
+    return this.killSwitchStore.isActive();
   }
 
   getMode(): TradingMode {
@@ -151,8 +169,6 @@ export class RiskEngine {
     return this.limits;
   }
 }
-
-// ─── Default Risk Limits ──────────────────────────────────────────────────────
 
 export const DEFAULT_RISK_LIMITS: RiskLimits = {
   maxPortfolioExposurePct: 50,
