@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 
 from ..backtest.engine import BacktestConfig, run_backtest
 from ..scanners.anomaly_scanner import scan_ohlcv
+from ..validation.research_validator import validate_research
 from ..validation.validator import validate_backtest
 
-app = FastAPI(title="Quant Swarm Engine", version="0.1.0")
+app = FastAPI(title="Quant Swarm Engine", version="0.2.0")
 
 
 class Candle(BaseModel):
@@ -37,6 +38,12 @@ class BacktestRequest(BaseModel):
 
 class ValidateRequest(BaseModel):
     result: dict[str, Any]
+    thresholds: dict[str, float] | None = None
+
+
+class ResearchValidateRequest(BaseModel):
+    result: dict[str, Any]
+    evidence: dict[str, Any] = Field(default_factory=dict)
     thresholds: dict[str, float] | None = None
 
 
@@ -132,3 +139,17 @@ def backtest(req: BacktestRequest) -> dict[str, Any]:
 def validate(req: ValidateRequest) -> dict[str, Any]:
     report = validate_backtest(req.result, req.thresholds)
     return report.to_dict()
+
+
+@app.post("/validate/research")
+def validate_research_evidence(req: ResearchValidateRequest) -> dict[str, Any]:
+    """Validate a backtest plus evidence from the broader strategy-search process.
+
+    Missing DSR/PBO/FDR/regime/CV evidence is deliberately returned as REVIEW,
+    never silently promoted to PASS.
+    """
+    try:
+        report = validate_research(req.result, req.evidence, req.thresholds)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _json_safe(report.to_dict())
