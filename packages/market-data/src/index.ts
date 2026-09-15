@@ -1,7 +1,5 @@
 import type { OHLCV } from "@quant-swarm/shared";
 
-// ─── Provider Interface ───────────────────────────────────────────────────────
-
 export interface MarketDataProvider {
   readonly name: string;
   getHistoricalOHLCV(
@@ -11,7 +9,13 @@ export interface MarketDataProvider {
   ): Promise<OHLCV[]>;
 }
 
-// ─── Exports ──────────────────────────────────────────────────────────────────
-
+export * from "./types.js";
+export * from "./resilient-stream.js";
 export { SyntheticMarketDataProvider } from "./synthetic.js";
 export type { SyntheticConfig } from "./synthetic.js";
+export { BinanceMarketDataProvider } from "./binance.js";
+export type { BinanceProviderOptions } from "./binance.js";
+export { BybitMarketDataProvider } from "./bybit.js";
+export type { BybitProviderOptions } from "./bybit.js";
+export { HyperliquidMarketDataProvider } from "./hyperliquid.js";
+export type { HyperliquidProviderOptions } from "./hyperliquid.js";

@@ -1,13 +1,15 @@
 # Quant Swarm
 
-**AI Quant Research Platform** — multi-agent hypothesis generation, deterministic backtesting, statistical validation, and an AI-independent risk layer.
+**AI Quant Research Platform** — multi-agent hypothesis generation, deterministic market scanning/backtesting, statistical validation, and an AI-independent risk layer.
 
 ## Architecture
 
 ```text
-Market Data Provider
+Exchange REST/WebSocket
         ↓
-Deterministic Scanner
+Normalized Market Data
+        ↓
+Deterministic Multi-Symbol Scanner
         ↓
 Candidate Event
         ↓
@@ -38,12 +40,12 @@ Shadow / Paper / Live
 ```text
 quant-swarm/
 ├─ apps/
-│  └─ api/                    # TypeScript pipeline orchestrator
+│  └─ api/                    # Pipeline + observation-only live scanner
 ├─ packages/
 │  ├─ shared/                 # Shared contracts
 │  ├─ strategy-schema/        # Zod strategy DSL
 │  ├─ event-bus/              # Typed in-process event bus
-│  ├─ market-data/            # Providers; synthetic in Milestone 1
+│  ├─ market-data/            # Synthetic + Binance + Bybit + Hyperliquid
 │  ├─ risk-contracts/         # AI-independent risk engine
 │  └─ ai-orchestrator/        # Research-agent interface + mock agent
 ├─ services/
@@ -57,9 +59,7 @@ quant-swarm/
 └─ .github/workflows/ci.yml
 ```
 
-## Milestone 1
-
-The implemented end-to-end path is:
+## Milestone 1 — complete
 
 ```text
 Synthetic BTC OHLCV
@@ -74,9 +74,17 @@ Synthetic BTC OHLCV
 
 The backtester uses next-bar-open execution for close-confirmed signals, intrabar high/low for stops and targets, conservative same-bar stop/target handling, mark-to-market equity, and net fees/slippage.
 
-The current validator is intentionally a **baseline gate**, not yet a full quant-grade research validator. Walk-forward analysis, purged/embargoed cross-validation, Deflated Sharpe Ratio, multiple-testing correction, and regime robustness belong to the next milestone.
+## Milestone 2 — live market-data foundation
 
-The local technical-rating implementation exported as `technical_rating_approx` is explicitly an approximation. It uses 15 moving-average style signals and 11 oscillator signals, including real HMA and VWMA20 calculations; it is not represented as TradingView server output.
+Implemented market-data providers:
+
+- **Binance Spot** — REST `/api/v3/klines` + combined kline WebSocket streams.
+- **Bybit V5** — REST `/v5/market/kline` + `kline.{interval}.{symbol}` public WebSocket topics.
+- **Hyperliquid** — `candleSnapshot` REST info requests + `candle` WebSocket subscriptions.
+
+All adapters normalize data into the same `MarketCandle` contract. Streaming uses reconnect with exponential backoff, best-effort REST backfill after reconnect, and timestamp deduplication so previously processed closed candles are not emitted twice.
+
+`MultiSymbolLiveScanner` maintains bounded rolling buffers per exchange/symbol/timeframe and sends only newly closed candles through the deterministic Python anomaly scanner. The live scanner is **observation-only**: it never creates or sends orders.
 
 ## Quick start
 
@@ -93,10 +101,35 @@ Start the deterministic quant engine:
 pnpm run dev:engine
 ```
 
-In another terminal, run the end-to-end pipeline:
+Run the synthetic Milestone 1 pipeline:
 
 ```bash
 pnpm run pipeline
+```
+
+Run the live observation-only scanner:
+
+```bash
+MARKET_PROVIDER=binance \
+MARKET_SUBSCRIPTIONS=BTCUSDT:15m,ETHUSDT:15m \
+pnpm run live:scan
+```
+
+For Bybit:
+
+```bash
+MARKET_PROVIDER=bybit \
+BYBIT_CATEGORY=linear \
+MARKET_SUBSCRIPTIONS=BTCUSDT:15m,ETHUSDT:15m \
+pnpm run live:scan
+```
+
+For Hyperliquid use native coin names:
+
+```bash
+MARKET_PROVIDER=hyperliquid \
+MARKET_SUBSCRIPTIONS=BTC:15m,ETH:15m \
+pnpm run live:scan
 ```
 
 Run tests:
@@ -115,16 +148,16 @@ TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 ```
 
-The risk engine supports explicit `reduceOnly` orders and a `KillSwitchStore` abstraction so production deployments can persist kill-switch state outside the process.
+The market-data adapters require no trading API keys. Execution APIs remain disabled. The risk engine supports explicit `reduceOnly` orders and a `KillSwitchStore` abstraction so production deployments can persist kill-switch state outside the process.
 
-## Current limitations
+## Current limitations / next milestone
 
-- Synthetic market data only in the default pipeline.
-- Long-only backtester in Milestone 1.
-- Baseline statistical validator only.
+- Long-only backtester.
+- Baseline statistical validator only; walk-forward, purged/embargoed CV, Deflated Sharpe, multiple-testing correction, and regime robustness are still pending.
 - Kill-switch store defaults to in-memory; a durable production adapter is still required.
 - No broker/exchange execution adapter is enabled.
 - No OpenAI/Kimi production research adapter is enabled yet.
+- Live scanner currently processes candle-close data; order-book/funding/open-interest feeds are next.
 
 ## License
 

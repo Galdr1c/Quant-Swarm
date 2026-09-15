@@ -1,14 +1,15 @@
 {
   "name": "quant-swarm",
   "private": true,
-  "version": "0.1.0",
-  "description": "AI Quant Research Platform — Multi-agent hypothesis generation + deterministic backtesting + quant-grade validation",
+  "version": "0.2.0",
+  "description": "AI Quant Research Platform — multi-agent research, deterministic market scanning/backtesting, statistical validation, and sovereign risk controls",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:py": "cd services/quant-engine && python -m pytest tests/ -v",
     "lint": "pnpm -r lint",
     "pipeline": "pnpm --filter @quant-swarm/api run pipeline",
+    "live:scan": "pnpm --filter @quant-swarm/api run live:scan",
     "dev:engine": "cd services/quant-engine && python -m uvicorn src.api.server:app --reload --port 8420"
   },
   "devDependencies": {
