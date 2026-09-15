@@ -61,3 +61,9 @@ jobs:
           cat /tmp/quant-engine.log
           exit 1
       - run: pnpm run pipeline
+      - name: Run Milestone 5 research smoke
+        env:
+          RESEARCH_PROVIDERS: mock,mock,mock
+          RESEARCH_LEDGER_PATH: .data/ci-research-ledger.jsonl
+          RESEARCH_RUN_ID: ci-research-smoke
+        run: pnpm run research:run
