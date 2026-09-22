@@ -1,6 +1,6 @@
 import type { OHLCV } from "@quant-swarm/shared";
 
-export type ExchangeName = "tradingview" | "binance" | "bybit" | "hyperliquid" | "synthetic";
+export type ExchangeName = "tradingview" | "synthetic";
 
 export interface MarketCandle extends OHLCV {
   exchange: ExchangeName;
@@ -40,13 +40,3 @@ export interface StreamingMarketDataProvider {
     options?: CandleStreamOptions
   ): CandleStream;
 }
-
-export interface WebSocketLike {
-  readyState: number;
-  send(data: string): void;
-  close(): void;
-  addEventListener(type: "open" | "message" | "close" | "error", listener: (event: any) => void): void;
-}
-
-export type WebSocketFactory = (url: string) => WebSocketLike;
-export type FetchLike = typeof fetch;

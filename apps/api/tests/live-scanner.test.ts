@@ -14,10 +14,10 @@ class FakeStream implements CandleStream {
 }
 
 class FakeProvider implements StreamingMarketDataProvider {
-  readonly name = "binance" as const;
+  readonly name = "tradingview" as const;
   handler?: CandleHandler;
 
-  async getHistoricalOHLCV(symbol: string, _timeframe: string, limit: number): Promise<OHLCV[]> {
+  async getHistoricalOHLCV(_symbol: string, _timeframe: string, limit: number): Promise<OHLCV[]> {
     return Array.from({ length: limit }, (_, i) => ({
       timestamp: i * 60_000,
       open: 100 + i,
@@ -50,7 +50,7 @@ class FakeScannerClient implements ScannerClient {
 }
 
 describe("MultiSymbolLiveScanner", () => {
-  it("backfills each symbol and scans only closed candles", async () => {
+  it("backfills TradingView symbols and scans only closed candles", async () => {
     const provider = new FakeProvider();
     const client = new FakeScannerClient();
     const candidates: CandidateEvent[] = [];
@@ -61,16 +61,16 @@ describe("MultiSymbolLiveScanner", () => {
     });
 
     await scanner.start([
-      { symbol: "BTCUSDT", timeframe: "15m" },
-      { symbol: "ETHUSDT", timeframe: "15m" },
+      { symbol: "BINANCE:BTCUSDT", timeframe: "15m" },
+      { symbol: "NASDAQ:AAPL", timeframe: "15m" },
     ]);
 
-    expect(scanner.getBuffer("binance", "BTCUSDT", "15m")).toHaveLength(120);
-    expect(scanner.getBuffer("binance", "ETHUSDT", "15m")).toHaveLength(120);
+    expect(scanner.getBuffer("tradingview", "BINANCE:BTCUSDT", "15m")).toHaveLength(120);
+    expect(scanner.getBuffer("tradingview", "NASDAQ:AAPL", "15m")).toHaveLength(120);
 
     await provider.handler?.({
-      exchange: "binance",
-      symbol: "BTCUSDT",
+      exchange: "tradingview",
+      symbol: "BINANCE:BTCUSDT",
       timeframe: "15m",
       timestamp: 120 * 60_000,
       open: 220,
@@ -83,8 +83,8 @@ describe("MultiSymbolLiveScanner", () => {
     expect(client.calls).toHaveLength(0);
 
     await provider.handler?.({
-      exchange: "binance",
-      symbol: "BTCUSDT",
+      exchange: "tradingview",
+      symbol: "BINANCE:BTCUSDT",
       timeframe: "15m",
       timestamp: 120 * 60_000,
       open: 220,
@@ -95,7 +95,7 @@ describe("MultiSymbolLiveScanner", () => {
       closed: true,
     });
 
-    expect(client.calls).toEqual([{ symbol: "BTCUSDT", size: 120 }]);
+    expect(client.calls).toEqual([{ symbol: "BINANCE:BTCUSDT", size: 120 }]);
     expect(candidates).toHaveLength(1);
     expect(candidates[0].timestamp).toBe(120 * 60_000);
     scanner.stop();
