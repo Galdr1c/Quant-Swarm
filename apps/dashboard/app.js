@@ -1,141 +1,515 @@
-const state={report:null,filter:"ALL",selectedIndex:0};
-const $=(id)=>document.getElementById(id);
+const state = {
+  report: null,
+  filter: "ALL",
+  selectedIndex: 0,
+};
 
-document.addEventListener("DOMContentLoaded",()=>{
-  $("refresh-button").addEventListener("click",loadReport);
-  $("run-button").addEventListener("click",copyRunCommand);
-  $("filters").addEventListener("click",(event)=>{
-    const button=event.target.closest("[data-filter]");
-    if(!button)return;
-    state.filter=button.dataset.filter;
-    document.querySelectorAll(".filter").forEach((node)=>node.classList.toggle("active",node===button));
-    renderTable();
+const $ = (id) => document.getElementById(id);
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const finePointer = matchMedia("(pointer: fine)").matches;
+
+document.addEventListener("DOMContentLoaded", () => {
+  $("refresh-button")?.addEventListener("click", () => loadReport(true));
+  $("run-button")?.addEventListener("click", copyRunCommand);
+
+  $("filters")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-filter]");
+    if (!button) return;
+
+    state.filter = button.dataset.filter;
+    document.querySelectorAll(".filter").forEach((node) => {
+      node.classList.toggle("active", node === button);
+    });
+
+    transition(() => renderFleet());
   });
-  loadReport();
+
+  document.querySelectorAll("[data-jump]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const selector = button.getAttribute("data-jump");
+      const target = selector ? document.querySelector(selector) : null;
+      if (!target) return;
+      target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+      document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+    });
+  });
+
+  installTilt();
+  installScrollSpy();
+  loadReport(false);
 });
 
-async function loadReport(){
-  try{
-    const response=await fetch("/api/report",{cache:"no-store"});
-    if(!response.ok)throw new Error("Report request failed: "+response.status);
-    state.report=await response.json();
-    state.selectedIndex=0;
-    render();
-    toast(state.report.demo?"Loaded demo dashboard data":"Research report refreshed");
-  }catch(error){toast(error instanceof Error?error.message:String(error))}
-}
+async function loadReport(showRefreshToast) {
+  try {
+    $("refresh-button")?.setAttribute("aria-busy", "true");
+    const response = await fetch("/api/report", { cache: "no-store" });
+    if (!response.ok) throw new Error("Report request failed: " + response.status);
 
-function render(){
-  const report=state.report;if(!report)return;
-  const summary=report.summary||{};
-  $("generated-at").textContent=formatDate(report.generatedAt);
-  $("demo-badge").hidden=!report.demo;
-  $("kpi-assets").textContent=formatInteger(summary.completed||0);
-  $("kpi-assets-note").textContent=(summary.assets||0)+" configured · "+(summary.noSignal||0)+" no signal";
-  $("kpi-positive").textContent=formatPercent(summary.positiveHoldoutRate||0,1);
-  $("kpi-pass").textContent=String(summary.pass||0);
-  $("kpi-pass-note").textContent=(summary.review||0)+" review · "+(summary.fail||0)+" fail";
-  $("kpi-return").textContent=formatSignedPercent(summary.averageHoldoutReturn||0,1);
-  $("median-sharpe").textContent=formatNumber(summary.medianHoldoutSharpe||0,2);
-  const completed=(report.results||[]).filter((row)=>row.status==="COMPLETED");
-  renderHero(completed[0]);renderValidation(completed[0]);renderTable();
-  if(completed[0])renderDetail(completed[0],0);
-}
+    const report = await response.json();
+    transition(() => {
+      state.report = report;
+      state.selectedIndex = 0;
+      render();
+    });
 
-function renderHero(row){
-  if(!row){
-    $("hero-symbol").textContent="No completed research";
-    ["hero-return","hero-sharpe","hero-drawdown","hero-winrate"].forEach((id)=>$(id).textContent="—");
-    setVerdict($("hero-verdict"),null);drawEquity([]);return;
+    if (showRefreshToast) {
+      toast(report.demo ? "Demo galaxy refreshed" : "Research universe refreshed");
+    } else if (report.demo) {
+      toast("Demo galaxy loaded — run research:universe for real evidence");
+    }
+  } catch (error) {
+    toast(error instanceof Error ? error.message : String(error));
+  } finally {
+    $("refresh-button")?.removeAttribute("aria-busy");
   }
-  $("hero-symbol").textContent=shortSymbol(row.symbol)+" · "+row.timeframe;
-  $("hero-return").textContent=formatSignedPercent(row.finalHoldout?.netReturn,2);
-  $("hero-sharpe").textContent=formatNumber(row.finalHoldout?.sharpe,2);
-  $("hero-drawdown").textContent=formatSignedPercent(row.finalHoldout?.maxDrawdown,2);
-  $("hero-winrate").textContent=formatPercent(row.finalHoldout?.winRate,1);
-  setVerdict($("hero-verdict"),row.verdict);drawEquity(row.equityCurve||[]);
 }
 
-function renderValidation(row){
-  const root=$("validation-list");root.innerHTML="";
-  const checks=row?.checks?.slice(0,6)||[];
-  if(!checks.length){
-    root.innerHTML='<div class="validation-row"><div><strong>No validation evidence</strong><small>Run universe research first</small></div><em class="verdict neutral">—</em></div>';return;
+function render() {
+  const report = state.report;
+  if (!report) return;
+
+  const summary = report.summary || {};
+  $("generated-at").textContent = formatDate(report.generatedAt);
+  $("demo-badge").hidden = !report.demo;
+
+  $("kpi-assets").textContent = formatInteger(summary.completed || 0);
+  $("kpi-assets-note").textContent =
+    (summary.assets || 0) + " configured · " + (summary.noSignal || 0) + " no signal";
+
+  $("kpi-positive").textContent = formatPercent(summary.positiveHoldoutRate || 0, 1);
+  $("kpi-pass").textContent = String(summary.pass || 0);
+  $("kpi-pass-note").textContent =
+    (summary.review || 0) + " review · " + (summary.fail || 0) + " fail";
+
+  $("kpi-return").textContent = formatSignedPercent(summary.averageHoldoutReturn || 0, 1);
+  $("median-sharpe").textContent = formatNumber(summary.medianHoldoutSharpe || 0, 2);
+
+  const completed = (report.results || []).filter((row) => row.status === "COMPLETED");
+  const selected = completed[0];
+
+  renderHero(selected);
+  renderValidation(selected);
+  renderFleet();
+
+  if (selected) {
+    const index = (report.results || []).indexOf(selected);
+    state.selectedIndex = Math.max(index, 0);
+    renderDetail(selected, state.selectedIndex);
   }
-  checks.forEach((check)=>{
-    const element=document.createElement("div");element.className="validation-row";
-    element.innerHTML='<div><strong>'+escapeHtml(prettyCheck(check.name))+'</strong><small>'+escapeHtml(check.detail||metricDetail(check))+'</small></div><em class="verdict '+verdictClass(check.verdict)+'">'+escapeHtml(check.verdict)+'</em>';
+}
+
+function renderHero(row) {
+  const card = document.querySelector(".market-planet-card");
+
+  if (!row) {
+    $("hero-symbol").textContent = "No surviving explorer";
+    ["hero-return", "hero-sharpe", "hero-drawdown", "hero-winrate"].forEach((id) => {
+      $(id).textContent = "—";
+    });
+    $("planet-label").textContent = "QS";
+    setVerdict($("hero-verdict"), null);
+    card?.removeAttribute("data-verdict");
+    drawEquity([]);
+    return;
+  }
+
+  const label = shortSymbol(row.symbol);
+  $("hero-symbol").textContent = label + " · " + row.timeframe;
+  $("planet-label").textContent = planetMonogram(label);
+  $("hero-return").textContent = formatSignedPercent(row.finalHoldout?.netReturn, 2);
+  $("hero-sharpe").textContent = formatNumber(row.finalHoldout?.sharpe, 2);
+  $("hero-drawdown").textContent = formatSignedPercent(row.finalHoldout?.maxDrawdown, 2);
+  $("hero-winrate").textContent = formatPercent(row.finalHoldout?.winRate, 1);
+  setVerdict($("hero-verdict"), row.verdict);
+
+  if (card) card.dataset.verdict = row.verdict || "NEUTRAL";
+  drawEquity(row.equityCurve || []);
+}
+
+function renderValidation(row) {
+  const root = $("validation-list");
+  if (!root) return;
+  root.innerHTML = "";
+
+  const checks = row?.checks?.slice(0, 6) || [];
+  if (!checks.length) {
+    root.innerHTML =
+      '<div class="validation-row"><div><strong>No validation evidence</strong><small>Launch universe research first.</small></div><em class="verdict neutral">—</em></div>';
+    return;
+  }
+
+  checks.forEach((check, index) => {
+    const element = document.createElement("div");
+    element.className = "validation-row";
+    element.style.setProperty("--row", String(index));
+    element.innerHTML =
+      '<div><strong>' +
+      escapeHtml(prettyCheck(check.name)) +
+      "</strong><small>" +
+      escapeHtml(check.detail || metricDetail(check)) +
+      '</small></div><em class="verdict ' +
+      verdictClass(check.verdict) +
+      '">' +
+      escapeHtml(check.verdict) +
+      "</em>";
     root.appendChild(element);
   });
 }
 
-function renderTable(){
-  const root=$("opportunity-rows");root.innerHTML="";if(!state.report)return;
-  const all=state.report.results||[];
-  const rows=all.filter((row)=>state.filter==="ALL"||row.verdict===state.filter);
-  rows.forEach((row)=>{
-    const rank=all.indexOf(row)+1;const tr=document.createElement("tr");
-    if(rank-1===state.selectedIndex)tr.classList.add("selected");
-    const done=row.status==="COMPLETED";
-    tr.innerHTML=
-      '<td class="rank">'+String(rank).padStart(2,"0")+'</td>'+
-      '<td class="market-cell"><strong>'+escapeHtml(shortSymbol(row.symbol))+'</strong><small>'+escapeHtml(exchangeName(row.symbol))+' · '+escapeHtml(row.timeframe)+'</small></td>'+
-      '<td class="strategy-cell"><strong>'+escapeHtml(row.selectedStrategy?.name||statusLabel(row.status))+'</strong><small>'+escapeHtml(row.candidate?.type||row.error||"—")+'</small></td>'+
-      '<td class="number '+numberClass(row.finalHoldout?.netReturn)+'">'+(done?formatSignedPercent(row.finalHoldout?.netReturn,2):"—")+'</td>'+
-      '<td>'+(done?formatNumber(row.finalHoldout?.sharpe,2):"—")+'</td>'+
-      '<td class="number '+numberClass(row.finalHoldout?.maxDrawdown)+'">'+(done?formatSignedPercent(row.finalHoldout?.maxDrawdown,2):"—")+'</td>'+
-      '<td>'+(done?formatPercent(row.finalHoldout?.winRate,1):"—")+'</td>'+
-      '<td><em class="verdict '+verdictClass(row.verdict)+'">'+escapeHtml(row.verdict||statusLabel(row.status))+'</em></td>';
-    tr.addEventListener("click",()=>{
-      state.selectedIndex=rank-1;renderDetail(row,rank-1);
-      document.querySelectorAll("#opportunity-rows tr").forEach((node)=>node.classList.remove("selected"));tr.classList.add("selected");
+function renderFleet() {
+  const root = $("opportunity-rows");
+  if (!root || !state.report) return;
+  root.innerHTML = "";
+
+  const all = state.report.results || [];
+  const rows = all.filter((row) => state.filter === "ALL" || row.verdict === state.filter);
+
+  rows.forEach((row) => {
+    const rank = all.indexOf(row) + 1;
+    const done = row.status === "COMPLETED";
+    const node = document.createElement("article");
+    node.className = "fleet-row";
+    node.tabIndex = 0;
+    node.setAttribute(
+      "aria-label",
+      shortSymbol(row.symbol) + " " + row.timeframe + " " + (row.verdict || statusLabel(row.status))
+    );
+
+    if (rank - 1 === state.selectedIndex) node.classList.add("selected");
+
+    node.innerHTML =
+      '<div class="fleet-rank">' +
+      String(rank).padStart(2, "0") +
+      '</div><div class="fleet-market"><strong>' +
+      escapeHtml(shortSymbol(row.symbol)) +
+      "</strong><small>" +
+      escapeHtml(exchangeName(row.symbol)) +
+      " · " +
+      escapeHtml(row.timeframe) +
+      '</small></div><div class="fleet-strategy"><strong>' +
+      escapeHtml(row.selectedStrategy?.name || statusLabel(row.status)) +
+      "</strong><small>" +
+      escapeHtml(row.candidate?.type || row.error || "—") +
+      '</small></div><div class="fleet-value fleet-holdout ' +
+      numberClass(row.finalHoldout?.netReturn) +
+      '">' +
+      (done ? formatSignedPercent(row.finalHoldout?.netReturn, 2) : "—") +
+      '</div><div class="fleet-value fleet-sharpe">' +
+      (done ? formatNumber(row.finalHoldout?.sharpe, 2) : "—") +
+      '</div><div class="fleet-value fleet-drawdown ' +
+      numberClass(row.finalHoldout?.maxDrawdown) +
+      '">' +
+      (done ? formatSignedPercent(row.finalHoldout?.maxDrawdown, 2) : "—") +
+      '</div><div class="fleet-value fleet-win">' +
+      (done ? formatPercent(row.finalHoldout?.winRate, 1) : "—") +
+      '</div><div class="fleet-verdict"><em class="verdict ' +
+      verdictClass(row.verdict) +
+      '">' +
+      escapeHtml(row.verdict || statusLabel(row.status)) +
+      "</em></div>";
+
+    const choose = () => selectRow(row, rank - 1, node);
+    node.addEventListener("click", choose);
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        choose();
+      }
     });
-    root.appendChild(tr);
+
+    root.appendChild(node);
   });
-  if(!rows.length)root.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">No results in this filter.</td></tr>';
+
+  if (!rows.length) {
+    root.innerHTML =
+      '<div class="empty-row">No tiny explorers live in this filter yet.</div>';
+  }
 }
 
-function renderDetail(row,index){
-  $("detail-title").textContent=shortSymbol(row.symbol)+" · "+row.timeframe;
-  const final=row.finalHoldout,validation=row.validation;
-  $("detail-content").innerHTML=
-    '<div class="detail-grid">'+
-    detail("Rank","#"+(index+1))+detail("Candidate",row.candidate?.type||"—")+detail("Signal score",formatNumber(row.candidate?.score,2))+
-    detail("Validation return",formatSignedPercent(validation?.netReturn,2))+detail("Holdout PF",formatNumber(final?.profitFactor,2))+detail("Trades",formatInteger(final?.totalTrades||0))+
-    '</div><div class="detail-note"><strong>'+escapeHtml(row.selectedStrategy?.name||statusLabel(row.status))+'</strong><br>'+
-    (row.runId?"Run: "+escapeHtml(row.runId)+"<br>":"")+
-    'Ordering uses research verdict first, then final-holdout Sharpe and return. It is evidence ranking, not a promise of future profitability.</div>';
-  if(row.status==="COMPLETED"){renderHero(row);renderValidation(row)}
+function selectRow(row, index, node) {
+  transition(() => {
+    state.selectedIndex = index;
+    document.querySelectorAll(".fleet-row").forEach((item) => item.classList.remove("selected"));
+    node.classList.add("selected");
+    renderDetail(row, index);
+
+    if (row.status === "COMPLETED") {
+      renderHero(row);
+      renderValidation(row);
+    }
+  });
 }
 
-function detail(label,value){return '<div class="detail-stat"><span>'+escapeHtml(label)+'</span><strong>'+escapeHtml(value)+'</strong></div>'}
+function renderDetail(row, index) {
+  $("detail-title").textContent = shortSymbol(row.symbol) + " · " + row.timeframe;
 
-function drawEquity(values){
-  const line=$("line-path"),area=$("area-path");
-  if(!Array.isArray(values)||values.length<2){line.setAttribute("d","");area.setAttribute("d","");return}
-  const finite=values.map(Number).filter(Number.isFinite);if(finite.length<2)return;
-  const width=760,top=22,bottom=228,min=Math.min(...finite),max=Math.max(...finite),range=Math.max(max-min,Math.abs(max)*.005,1);
-  const points=finite.map((value,index)=>[(index/(finite.length-1))*width,bottom-((value-min)/range)*(bottom-top)]);
-  const d=points.map(([x,y],index)=>(index===0?"M ":"L ")+x.toFixed(2)+" "+y.toFixed(2)).join(" ");
-  line.setAttribute("d",d);area.setAttribute("d",d+" L "+width+" "+bottom+" L 0 "+bottom+" Z");
+  const final = row.finalHoldout;
+  const validation = row.validation;
+  const content = $("detail-content");
+  if (!content) return;
+
+  content.innerHTML =
+    '<div class="detail-grid">' +
+    detail("Fleet rank", "#" + (index + 1)) +
+    detail("Candidate", row.candidate?.type || "—") +
+    detail("Signal score", formatNumber(row.candidate?.score, 2)) +
+    detail("Validation return", formatSignedPercent(validation?.netReturn, 2)) +
+    detail("Holdout PF", formatNumber(final?.profitFactor, 2)) +
+    detail("Trades", formatInteger(final?.totalTrades || 0)) +
+    '</div><div class="detail-note"><strong>' +
+    escapeHtml(row.selectedStrategy?.name || statusLabel(row.status)) +
+    "</strong><br>" +
+    (row.runId ? "Run: " + escapeHtml(row.runId) + "<br>" : "") +
+    "The cartoon fleet is decorative. Ranking still uses verdict first, then untouched final-holdout Sharpe and return — never a promise of future profitability.</div>";
 }
 
-async function copyRunCommand(){
-  const command="pnpm run dev:engine\n# separate terminal\npnpm run research:universe\n# separate terminal\npnpm run dashboard";
-  try{await navigator.clipboard.writeText(command);toast("Run commands copied")}catch{toast("Run: pnpm run research:universe")}
+function detail(label, value) {
+  return (
+    '<div class="detail-stat"><span>' +
+    escapeHtml(label) +
+    "</span><strong>" +
+    escapeHtml(value) +
+    "</strong></div>"
+  );
 }
-function setVerdict(node,verdict){node.className="verdict "+verdictClass(verdict);node.textContent=verdict||"—"}
-function verdictClass(v){return v==="PASS"?"pass":v==="REVIEW"?"review":v==="FAIL"?"fail":"neutral"}
-function statusLabel(v){return v==="NO_SIGNAL"?"NO SIGNAL":v==="ERROR"?"ERROR":v||"—"}
-function prettyCheck(v){return String(v||"check").replace(/[_-]+/g," ").replace(/\b\w/g,(c)=>c.toUpperCase())}
-function metricDetail(c){const p=[];if(Number.isFinite(c.value))p.push("value "+formatNumber(c.value,3));if(Number.isFinite(c.threshold))p.push("threshold "+formatNumber(c.threshold,3));return p.join(" · ")||"Deterministic validation check"}
-function exchangeName(v){return String(v||"").split(":")[0]||"TradingView"}
-function shortSymbol(v){const s=String(v||"");return s.includes(":")?s.split(":").slice(1).join(":"):s}
-function numberClass(v){const n=Number(v);return !Number.isFinite(n)?"":n>0?"positive":n<0?"negative":""}
-function formatDate(v){const d=new Date(v);return Number.isNaN(d.valueOf())?"—":new Intl.DateTimeFormat(undefined,{month:"short",day:"2-digit",hour:"2-digit",minute:"2-digit"}).format(d)}
-function formatInteger(v){return new Intl.NumberFormat(undefined,{maximumFractionDigits:0}).format(Number(v)||0)}
-function formatNumber(v,d=2){const n=Number(v);return Number.isFinite(n)?n.toFixed(d):"—"}
-function formatPercent(v,d=1){const n=Number(v);return Number.isFinite(n)?n.toFixed(d)+"%":"—"}
-function formatSignedPercent(v,d=1){const n=Number(v);return Number.isFinite(n)?(n>0?"+":"")+n.toFixed(d)+"%":"—"}
-function escapeHtml(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
-let toastTimer;function toast(message){const node=$("toast");node.textContent=message;node.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove("show"),2200)}
+
+function drawEquity(values) {
+  const line = $("line-path");
+  const area = $("area-path");
+  if (!line || !area) return;
+
+  if (!Array.isArray(values) || values.length < 2) {
+    line.setAttribute("d", "");
+    area.setAttribute("d", "");
+    return;
+  }
+
+  const finite = values.map(Number).filter(Number.isFinite);
+  if (finite.length < 2) return;
+
+  const width = 760;
+  const top = 22;
+  const bottom = 228;
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const range = Math.max(max - min, Math.abs(max) * 0.005, 1);
+
+  const points = finite.map((value, index) => [
+    (index / (finite.length - 1)) * width,
+    bottom - ((value - min) / range) * (bottom - top),
+  ]);
+
+  const path = points
+    .map(([x, y], index) => (index === 0 ? "M " : "L ") + x.toFixed(2) + " " + y.toFixed(2))
+    .join(" ");
+
+  line.setAttribute("d", path);
+  area.setAttribute("d", path + " L " + width + " " + bottom + " L 0 " + bottom + " Z");
+
+  if (!reduceMotion && typeof line.animate === "function") {
+    const length = line.getTotalLength?.() || 0;
+    if (length > 0) {
+      line.style.strokeDasharray = String(length);
+      line.style.strokeDashoffset = String(length);
+      line.animate(
+        [{ strokeDashoffset: length }, { strokeDashoffset: 0 }],
+        { duration: 900, easing: "cubic-bezier(.16,.84,.24,1)", fill: "forwards" }
+      );
+    }
+  }
+}
+
+function installTilt() {
+  if (!finePointer || reduceMotion) return;
+
+  const maxTilt = 5.5;
+  document.querySelectorAll(".tilt-card").forEach((card) => {
+    let frame = 0;
+
+    const reset = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        card.style.transform = "";
+      });
+    };
+
+    card.addEventListener("pointermove", (event) => {
+      const rect = card.getBoundingClientRect();
+      const nx = (event.clientX - rect.left) / Math.max(rect.width, 1) - 0.5;
+      const ny = (event.clientY - rect.top) / Math.max(rect.height, 1) - 0.5;
+
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rotateY = nx * maxTilt * 2;
+        const rotateX = -ny * maxTilt * 2;
+        card.style.transform =
+          "perspective(1100px) rotateX(" +
+          rotateX.toFixed(2) +
+          "deg) rotateY(" +
+          rotateY.toFixed(2) +
+          "deg) translateZ(5px)";
+      });
+    });
+
+    card.addEventListener("pointerleave", reset);
+    card.addEventListener("pointercancel", reset);
+  });
+}
+
+function installScrollSpy() {
+  if (!("IntersectionObserver" in window)) return;
+
+  const map = new Map([
+    ["top", document.querySelector('[data-jump="#top"]')],
+    ["opportunities", document.querySelector('[data-jump="#opportunities"]')],
+    ["evidence", document.querySelector('[data-jump="#evidence"]')],
+    ["pipeline", document.querySelector('[data-jump="#pipeline"]')],
+  ]);
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (!visible) return;
+
+      document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+      map.get(visible.target.id)?.classList.add("active");
+    },
+    { rootMargin: "-15% 0px -65% 0px", threshold: [0.05, 0.25, 0.5] }
+  );
+
+  ["top", "opportunities", "evidence", "pipeline"].forEach((id) => {
+    const node = document.getElementById(id);
+    if (node) observer.observe(node);
+  });
+}
+
+async function copyRunCommand() {
+  const command =
+    "pnpm run dev:engine\n" +
+    "# separate terminal\n" +
+    "pnpm run research:universe\n" +
+    "# separate terminal\n" +
+    "pnpm run dashboard";
+
+  try {
+    await navigator.clipboard.writeText(command);
+    toast("Launch commands copied ✦");
+  } catch {
+    toast("Run: pnpm run research:universe");
+  }
+}
+
+function transition(update) {
+  if (reduceMotion || typeof document.startViewTransition !== "function") {
+    update();
+    return;
+  }
+
+  document.startViewTransition(() => update());
+}
+
+function setVerdict(node, verdict) {
+  if (!node) return;
+  node.className = "verdict " + verdictClass(verdict);
+  node.textContent = verdict || "—";
+}
+
+function verdictClass(value) {
+  if (value === "PASS") return "pass";
+  if (value === "REVIEW") return "review";
+  if (value === "FAIL") return "fail";
+  return "neutral";
+}
+
+function statusLabel(value) {
+  if (value === "NO_SIGNAL") return "NO SIGNAL";
+  if (value === "ERROR") return "ERROR";
+  return value || "—";
+}
+
+function prettyCheck(value) {
+  return String(value || "check")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function metricDetail(check) {
+  const parts = [];
+  if (Number.isFinite(check.value)) parts.push("value " + formatNumber(check.value, 3));
+  if (Number.isFinite(check.threshold)) parts.push("threshold " + formatNumber(check.threshold, 3));
+  return parts.join(" · ") || "Deterministic validation check";
+}
+
+function exchangeName(value) {
+  return String(value || "").split(":")[0] || "TradingView";
+}
+
+function shortSymbol(value) {
+  const symbol = String(value || "");
+  return symbol.includes(":") ? symbol.split(":").slice(1).join(":") : symbol;
+}
+
+function planetMonogram(value) {
+  const cleaned = String(value || "QS").replace(/[^A-Za-z0-9]/g, "");
+  return (cleaned.slice(0, 4) || "QS").toUpperCase();
+}
+
+function numberClass(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return number > 0 ? "positive" : number < 0 ? "negative" : "";
+}
+
+function formatDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Number(value) || 0);
+}
+
+function formatNumber(value, digits = 2) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(digits) : "—";
+}
+
+function formatPercent(value, digits = 1) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(digits) + "%" : "—";
+}
+
+function formatSignedPercent(value, digits = 1) {
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? (number > 0 ? "+" : "") + number.toFixed(digits) + "%"
+    : "—";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+let toastTimer;
+function toast(message) {
+  const node = $("toast");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove("show"), 2400);
+}
