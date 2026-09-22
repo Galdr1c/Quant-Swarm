@@ -1,0 +1,544 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-22T19:50:00.000Z",
+  "source": "tradingview",
+  "demo": true,
+  "summary": {
+    "assets": 8,
+    "completed": 7,
+    "pass": 3,
+    "review": 2,
+    "fail": 2,
+    "noSignal": 1,
+    "errors": 0,
+    "positiveHoldout": 5,
+    "positiveHoldoutRate": 71.4,
+    "averageHoldoutReturn": 8.7,
+    "medianHoldoutSharpe": 1.08
+  },
+  "results": [
+    {
+      "symbol": "NASDAQ:NVDA",
+      "timeframe": "1h",
+      "status": "COMPLETED",
+      "runId": "demo-nvda-1h",
+      "candidate": {
+        "type": "VOLATILITY_EXPANSION",
+        "score": 4.21,
+        "timestamp": 1789990000000
+      },
+      "selectedStrategy": {
+        "id": "nvda-momentum-demo",
+        "name": "NVDA Adaptive Momentum"
+      },
+      "validation": {
+        "netReturn": 18.4,
+        "annualReturn": 34.1,
+        "sharpe": 1.61,
+        "sortino": 2.08,
+        "maxDrawdown": -9.7,
+        "profitFactor": 1.58,
+        "expectancy": 0.42,
+        "totalTrades": 28,
+        "winRate": 57.1
+      },
+      "finalHoldout": {
+        "netReturn": 12.8,
+        "annualReturn": 25.5,
+        "sharpe": 1.72,
+        "sortino": 2.31,
+        "maxDrawdown": -6.9,
+        "profitFactor": 1.71,
+        "expectancy": 0.51,
+        "totalTrades": 17,
+        "winRate": 58.8
+      },
+      "verdict": "PASS",
+      "checks": [
+        {
+          "name": "probabilistic_sharpe_ratio",
+          "verdict": "PASS",
+          "value": 0.982,
+          "threshold": 0.95,
+          "detail": "Sharpe significance clears the research threshold."
+        },
+        {
+          "name": "deflated_sharpe_ratio",
+          "verdict": "PASS",
+          "value": 0.961,
+          "threshold": 0.95,
+          "detail": "Adjusted for repeated strategy trials."
+        },
+        {
+          "name": "probability_of_backtest_overfitting",
+          "verdict": "PASS",
+          "value": 0.18,
+          "threshold": 0.5,
+          "detail": "CSCV overfit estimate remains below threshold."
+        },
+        {
+          "name": "false_discovery_rate",
+          "verdict": "PASS",
+          "value": 0.031,
+          "threshold": 0.05,
+          "detail": "Candidate survives multiple-testing correction."
+        },
+        {
+          "name": "regime_robustness",
+          "verdict": "PASS",
+          "value": 0.67,
+          "threshold": 0.5,
+          "detail": "Positive evidence across market regimes."
+        }
+      ],
+      "equityCurve": [
+        100000,
+        100700,
+        100250,
+        101100,
+        102400,
+        102050,
+        103300,
+        104100,
+        103650,
+        105500,
+        106200,
+        105900,
+        107100,
+        108800,
+        108350,
+        109900,
+        111400,
+        110900,
+        112800
+      ]
+    },
+    {
+      "symbol": "BINANCE:BTCUSDT",
+      "timeframe": "4h",
+      "status": "COMPLETED",
+      "runId": "demo-btc-4h",
+      "candidate": {
+        "type": "VOLUME_ANOMALY",
+        "score": 3.84,
+        "timestamp": 1789990000000
+      },
+      "selectedStrategy": {
+        "id": "btc-volume-demo",
+        "name": "BTC Volume Breakout EMA"
+      },
+      "validation": {
+        "netReturn": 15.2,
+        "annualReturn": 30.2,
+        "sharpe": 1.38,
+        "sortino": 1.72,
+        "maxDrawdown": -12.3,
+        "profitFactor": 1.49,
+        "expectancy": 0.37,
+        "totalTrades": 35,
+        "winRate": 54.3
+      },
+      "finalHoldout": {
+        "netReturn": 9.6,
+        "annualReturn": 20.1,
+        "sharpe": 1.44,
+        "sortino": 1.91,
+        "maxDrawdown": -10.8,
+        "profitFactor": 1.54,
+        "expectancy": 0.33,
+        "totalTrades": 21,
+        "winRate": 57.1
+      },
+      "verdict": "PASS",
+      "checks": [
+        {
+          "name": "probabilistic_sharpe_ratio",
+          "verdict": "PASS",
+          "value": 0.972,
+          "threshold": 0.95
+        },
+        {
+          "name": "deflated_sharpe_ratio",
+          "verdict": "PASS",
+          "value": 0.953,
+          "threshold": 0.95
+        },
+        {
+          "name": "probability_of_backtest_overfitting",
+          "verdict": "PASS",
+          "value": 0.27,
+          "threshold": 0.5
+        },
+        {
+          "name": "regime_robustness",
+          "verdict": "PASS",
+          "value": 0.67,
+          "threshold": 0.5
+        }
+      ],
+      "equityCurve": [
+        100000,
+        100500,
+        100100,
+        101700,
+        102300,
+        101800,
+        103000,
+        103800,
+        104600,
+        104100,
+        105200,
+        106700,
+        106000,
+        107900,
+        109600
+      ]
+    },
+    {
+      "symbol": "TVC:GOLD",
+      "timeframe": "4h",
+      "status": "COMPLETED",
+      "runId": "demo-gold-4h",
+      "candidate": {
+        "type": "PRICE_DISLOCATION",
+        "score": 3.31,
+        "timestamp": 1789990000000
+      },
+      "selectedStrategy": {
+        "id": "gold-reversion-demo",
+        "name": "Gold RSI Mean Reversion"
+      },
+      "validation": {
+        "netReturn": 9.2,
+        "annualReturn": 18.2,
+        "sharpe": 1.16,
+        "sortino": 1.52,
+        "maxDrawdown": -7.1,
+        "profitFactor": 1.42,
+        "expectancy": 0.28,
+        "totalTrades": 26,
+        "winRate": 61.5
+      },
+      "finalHoldout": {
+        "netReturn": 7.9,
+        "annualReturn": 15.4,
+        "sharpe": 1.29,
+        "sortino": 1.67,
+        "maxDrawdown": -5.8,
+        "profitFactor": 1.47,
+        "expectancy": 0.29,
+        "totalTrades": 15,
+        "winRate": 60
+      },
+      "verdict": "PASS",
+      "checks": [
+        {
+          "name": "probabilistic_sharpe_ratio",
+          "verdict": "PASS",
+          "value": 0.966,
+          "threshold": 0.95
+        },
+        {
+          "name": "deflated_sharpe_ratio",
+          "verdict": "PASS",
+          "value": 0.951,
+          "threshold": 0.95
+        },
+        {
+          "name": "regime_robustness",
+          "verdict": "PASS",
+          "value": 0.67,
+          "threshold": 0.5
+        }
+      ],
+      "equityCurve": [
+        100000,
+        100300,
+        100850,
+        100600,
+        101400,
+        101900,
+        102700,
+        102300,
+        103400,
+        104100,
+        104900,
+        105500,
+        106100,
+        107000,
+        107900
+      ]
+    },
+    {
+      "symbol": "NASDAQ:MSFT",
+      "timeframe": "1h",
+      "status": "COMPLETED",
+      "runId": "demo-msft-1h",
+      "candidate": {
+        "type": "VOLUME_ANOMALY",
+        "score": 3.12,
+        "timestamp": 1789990000000
+      },
+      "selectedStrategy": {
+        "id": "msft-demo",
+        "name": "MSFT Trend Continuation"
+      },
+      "validation": {
+        "netReturn": 8.3,
+        "annualReturn": 16.1,
+        "sharpe": 1.02,
+        "sortino": 1.31,
+        "maxDrawdown": -8.1,
+        "profitFactor": 1.32,
+        "expectancy": 0.2,
+        "totalTrades": 29,
+        "winRate": 55.2
+      },
+      "finalHoldout": {
+        "netReturn": 5.1,
+        "annualReturn": 10.4,
+        "sharpe": 1.08,
+        "sortino": 1.34,
+        "maxDrawdown": -7.2,
+        "profitFactor": 1.29,
+        "expectancy": 0.18,
+        "totalTrades": 18,
+        "winRate": 55.6
+      },
+      "verdict": "REVIEW",
+      "checks": [
+        {
+          "name": "probabilistic_sharpe_ratio",
+          "verdict": "PASS",
+          "value": 0.956,
+          "threshold": 0.95
+        },
+        {
+          "name": "deflated_sharpe_ratio",
+          "verdict": "REVIEW",
+          "detail": "Evidence is near the adjusted threshold."
+        },
+        {
+          "name": "regime_robustness",
+          "verdict": "REVIEW",
+          "detail": "One regime remains weak."
+        }
+      ],
+      "equityCurve": [
+        100000,
+        100200,
+        100900,
+        100500,
+        101300,
+        102000,
+        101700,
+        102400,
+        103100,
+        103600,
+        104100,
+        104700,
+        105100
+      ]
+    },
+    {
+      "symbol": "OANDA:EURUSD",
+      "timeframe": "1h",
+      "status": "COMPLETED",
+      "runId": "demo-eurusd-1h",
+      "candidate": {
+        "type": "PRICE_DISLOCATION",
+        "score": 2.98,
+        "timestamp": 1789990000000
+      },
+      "selectedStrategy": {
+        "id": "eurusd-demo",
+        "name": "EURUSD Reversion Filter"
+      },
+      "validation": {
+        "netReturn": 4.1,
+        "annualReturn": 8.4,
+        "sharpe": 0.86,
+        "sortino": 1.06,
+        "maxDrawdown": -5.9,
+        "profitFactor": 1.21,
+        "expectancy": 0.11,
+        "totalTrades": 31,
+        "winRate": 54.8
+      },
+      "finalHoldout": {
+        "netReturn": 2.7,
+        "annualReturn": 5.6,
+        "sharpe": 0.79,
+        "sortino": 1.01,
+        "maxDrawdown": -5.1,
+        "profitFactor": 1.18,
+        "expectancy": 0.09,
+        "totalTrades": 19,
+        "winRate": 52.6
+      },
+      "verdict": "REVIEW",
+      "checks": [
+        {
+          "name": "probabilistic_sharpe_ratio",
+          "verdict": "REVIEW",
+          "value": 0.934,
+          "threshold": 0.95
+        },
+        {
+          "name": "deflated_sharpe_ratio",
+          "verdict": "REVIEW"
+        },
+        {
+          "name": "regime_robustness",
+          "verdict": "PASS",
+          "value": 0.67,
+          "threshold": 0.5
+        }
+      ],
+      "equityCurve": [
+        100000,
+        100150,
+        99950,
+        100300,
+        100650,
+        100420,
+        100880,
+        101150,
+        101480,
+        101200,
+        101900,
+        102300,
+        102700
+      ]
+    },
+    {
+      "symbol": "NASDAQ:AAPL",
+      "timeframe": "1h",
+      "status": "COMPLETED",
+      "runId": "demo-aapl-1h",
+      "candidate": {
+        "type": "VOLUME_ANOMALY",
+        "score": 2.88,
+        "timestamp": 1789990000000
+      },
+      "selectedStrategy": {
+        "id": "aapl-demo",
+        "name": "AAPL EMA Momentum"
+      },
+      "validation": {
+        "netReturn": 3.7,
+        "annualReturn": 7.1,
+        "sharpe": 0.72,
+        "sortino": 0.91,
+        "maxDrawdown": -9.4,
+        "profitFactor": 1.13,
+        "expectancy": 0.06,
+        "totalTrades": 30,
+        "winRate": 50
+      },
+      "finalHoldout": {
+        "netReturn": -1.8,
+        "annualReturn": -3.2,
+        "sharpe": 0.18,
+        "sortino": 0.22,
+        "maxDrawdown": -10.3,
+        "profitFactor": 0.94,
+        "expectancy": -0.04,
+        "totalTrades": 18,
+        "winRate": 44.4
+      },
+      "verdict": "FAIL",
+      "checks": [
+        {
+          "name": "probabilistic_sharpe_ratio",
+          "verdict": "FAIL",
+          "value": 0.61,
+          "threshold": 0.95
+        },
+        {
+          "name": "final_holdout_return",
+          "verdict": "FAIL",
+          "value": -1.8,
+          "threshold": 0
+        }
+      ],
+      "equityCurve": [
+        100000,
+        99600,
+        100100,
+        99100,
+        99400,
+        98600,
+        99000,
+        98200
+      ]
+    },
+    {
+      "symbol": "OANDA:USDJPY",
+      "timeframe": "1h",
+      "status": "COMPLETED",
+      "runId": "demo-usdjpy-1h",
+      "candidate": {
+        "type": "PRICE_DISLOCATION",
+        "score": 2.72,
+        "timestamp": 1789990000000
+      },
+      "selectedStrategy": {
+        "id": "usdjpy-demo",
+        "name": "USDJPY Mean Reversion"
+      },
+      "validation": {
+        "netReturn": 2.2,
+        "annualReturn": 4.4,
+        "sharpe": 0.48,
+        "sortino": 0.62,
+        "maxDrawdown": -8.8,
+        "profitFactor": 1.04,
+        "expectancy": 0.01,
+        "totalTrades": 32,
+        "winRate": 50
+      },
+      "finalHoldout": {
+        "netReturn": -3.4,
+        "annualReturn": -6.8,
+        "sharpe": -0.22,
+        "sortino": -0.27,
+        "maxDrawdown": -11.4,
+        "profitFactor": 0.88,
+        "expectancy": -0.08,
+        "totalTrades": 20,
+        "winRate": 40
+      },
+      "verdict": "FAIL",
+      "checks": [
+        {
+          "name": "probabilistic_sharpe_ratio",
+          "verdict": "FAIL",
+          "value": 0.42,
+          "threshold": 0.95
+        },
+        {
+          "name": "expectancy",
+          "verdict": "FAIL",
+          "value": -0.08,
+          "threshold": 0
+        }
+      ],
+      "equityCurve": [
+        100000,
+        99500,
+        99800,
+        98800,
+        98200,
+        98700,
+        97500,
+        96600
+      ]
+    },
+    {
+      "symbol": "BINANCE:ETHUSDT",
+      "timeframe": "4h",
+      "status": "NO_SIGNAL"
+    }
+  ]
+}
