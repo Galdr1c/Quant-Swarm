@@ -88,13 +88,18 @@ function render() {
   const completed = (report.results || []).filter((row) => row.status === "COMPLETED");
   const selected = completed[0];
 
+  if (selected) {
+    const index = (report.results || []).indexOf(selected);
+    state.selectedIndex = Math.max(index, 0);
+  } else {
+    state.selectedIndex = 0;
+  }
+
   renderHero(selected);
   renderValidation(selected);
   renderFleet();
 
   if (selected) {
-    const index = (report.results || []).indexOf(selected);
-    state.selectedIndex = Math.max(index, 0);
     renderDetail(selected, state.selectedIndex);
   }
 }
@@ -361,29 +366,36 @@ function installScrollSpy() {
   if (!("IntersectionObserver" in window)) return;
 
   const map = new Map([
-    ["top", document.querySelector('[data-jump="#top"]')],
     ["opportunities", document.querySelector('[data-jump="#opportunities"]')],
     ["evidence", document.querySelector('[data-jump="#evidence"]')],
     ["pipeline", document.querySelector('[data-jump="#pipeline"]')],
   ]);
+
+  const activate = (button) => {
+    document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+    button?.classList.add("active");
+  };
 
   const observer = new IntersectionObserver(
     (entries) => {
       const visible = entries
         .filter((entry) => entry.isIntersecting)
         .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (!visible) return;
 
-      document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
-      map.get(visible.target.id)?.classList.add("active");
+      if (visible) activate(map.get(visible.target.id));
+      else if (scrollY < 360) activate(document.querySelector('[data-jump="#top"]'));
     },
-    { rootMargin: "-15% 0px -65% 0px", threshold: [0.05, 0.25, 0.5] }
+    { rootMargin: "-18% 0px -58% 0px", threshold: [0.05, 0.25, 0.5] }
   );
 
-  ["top", "opportunities", "evidence", "pipeline"].forEach((id) => {
+  ["opportunities", "evidence", "pipeline"].forEach((id) => {
     const node = document.getElementById(id);
     if (node) observer.observe(node);
   });
+
+  addEventListener("scroll", () => {
+    if (scrollY < 360) activate(document.querySelector('[data-jump="#top"]'));
+  }, { passive: true });
 }
 
 async function copyRunCommand() {
