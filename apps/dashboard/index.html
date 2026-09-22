@@ -4,129 +4,204 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>Quant Swarm — Research Command Center</title>
+  <meta name="theme-color" content="#120d2c">
+  <title>Quant Swarm — Cartoon Research Observatory</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+  <canvas id="shader-world" class="shader-world" aria-hidden="true"></canvas>
+  <div class="noise-layer" aria-hidden="true"></div>
+  <div class="sky-decor" aria-hidden="true">
+    <i class="cloud cloud-a"></i><i class="cloud cloud-b"></i><i class="cloud cloud-c"></i>
+    <i class="spark spark-a">✦</i><i class="spark spark-b">✦</i><i class="spark spark-c">✦</i>
+  </div>
+
   <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">QS</div>
-        <div><strong>Quant Swarm</strong><small>Research OS</small></div>
-      </div>
+    <aside class="sidebar glass-dock">
+      <a class="brand" href="#top" aria-label="Quant Swarm home">
+        <div class="brand-orb" aria-hidden="true">
+          <span class="brand-ring"></span>
+          <span class="brand-core">QS</span>
+        </div>
+        <div class="brand-copy"><strong>Quant Swarm</strong><small>Research Observatory</small></div>
+      </a>
 
       <nav class="side-nav" aria-label="Primary">
-        <button class="nav-item active" type="button"><span>⌁</span><b>Overview</b></button>
-        <button class="nav-item" type="button"><span>◇</span><b>Opportunities</b></button>
-        <button class="nav-item" type="button"><span>◎</span><b>Research Ledger</b></button>
-        <button class="nav-item" type="button"><span>⌘</span><b>Risk & System</b></button>
+        <button class="nav-item active" type="button" data-jump="#top"><span class="nav-glyph">⌁</span><b>Overview</b></button>
+        <button class="nav-item" type="button" data-jump="#opportunities"><span class="nav-glyph">◇</span><b>Opportunities</b></button>
+        <button class="nav-item" type="button" data-jump="#evidence"><span class="nav-glyph">✦</span><b>Evidence Lab</b></button>
+        <button class="nav-item" type="button" data-jump="#pipeline"><span class="nav-glyph">⌘</span><b>Pipeline</b></button>
       </nav>
 
-      <div class="mode-card">
-        <div><i></i><strong>Shadow mode</strong></div>
-        <p>Research only. Execution remains disabled.</p>
+      <div class="mode-card sticker tilt-card">
+        <div class="mode-orb"><span></span></div>
+        <div><strong>Shadow Mode</strong><p>Research only.<br>Execution stays asleep.</p></div>
       </div>
-      <div class="sidebar-footer"><span>Data source</span><strong>TradingView only</strong></div>
+
+      <div class="sidebar-source">
+        <span>DATA TELESCOPE</span>
+        <strong>TradingView</strong>
+        <small>universal market feed</small>
+      </div>
     </aside>
 
-    <main class="main">
+    <main class="main" id="top">
       <header class="topbar">
-        <div>
-          <div class="eyebrow">MULTI-ASSET QUANT RESEARCH</div>
-          <h1>Research Command Center</h1>
-          <p>TradingView universe · deterministic validation · final holdout ranking</p>
+        <div class="title-wrap">
+          <div class="eyebrow"><span></span> MULTI-ASSET QUANT RESEARCH</div>
+          <h1>Welcome to the <em>Swarm Observatory.</em></h1>
+          <p>We launch tiny strategy explorers into TradingView data, then let deterministic statistics decide which ones make it home.</p>
         </div>
         <div class="top-actions">
-          <button id="refresh-button" class="button ghost" type="button">Refresh</button>
-          <button id="run-button" class="button primary" type="button">Copy run command</button>
+          <button id="refresh-button" class="bubble-button bubble-secondary" type="button"><span>↻</span> Refresh</button>
+          <button id="run-button" class="bubble-button bubble-primary" type="button"><span>▶</span> Copy launch command</button>
         </div>
       </header>
 
-      <section class="status-strip">
-        <div><span>Source</span><strong>TradingView</strong></div>
-        <div><span>Last report</span><strong id="generated-at">—</strong></div>
-        <div><span>Research gate</span><strong>Final holdout</strong></div>
-        <div><span>Mode</span><strong class="positive-text">Shadow</strong></div>
-        <em id="demo-badge" hidden>Demo data</em>
+      <section class="orbit-status cartoon-surface" aria-label="System status">
+        <div class="status-badge"><span class="dot live"></span><small>Source</small><strong>TradingView</strong></div>
+        <div class="status-badge"><span class="mini-icon">◷</span><small>Last scan</small><strong id="generated-at">—</strong></div>
+        <div class="status-badge"><span class="mini-icon">◉</span><small>Gate</small><strong>Final holdout</strong></div>
+        <div class="status-badge"><span class="mini-icon">☁</span><small>Execution</small><strong>Sleeping</strong></div>
+        <em id="demo-badge" class="demo-badge" hidden>DEMO GALAXY</em>
       </section>
 
-      <section class="kpi-grid">
-        <article class="kpi-card"><span>Assets researched</span><strong id="kpi-assets">—</strong><small id="kpi-assets-note">Across configured universe</small></article>
-        <article class="kpi-card"><span>Positive holdout</span><strong id="kpi-positive">—</strong><small>Completed final holdouts above 0%</small></article>
-        <article class="kpi-card"><span>PASS strategies</span><strong id="kpi-pass">—</strong><small id="kpi-pass-note">Research-grade validation</small></article>
-        <article class="kpi-card"><span>Avg. holdout return</span><strong id="kpi-return">—</strong><small>Evidence, not a profit guarantee</small></article>
+      <section class="hero-stage">
+        <article class="market-planet-card cartoon-surface tilt-card">
+          <div class="planet-copy">
+            <div class="panel-kicker">TOP VALIDATED OPPORTUNITY</div>
+            <div class="hero-title-line">
+              <h2 id="hero-symbol">Waiting for report</h2>
+              <em id="hero-verdict" class="verdict neutral">—</em>
+            </div>
+            <p class="hero-subtitle">Best surviving strategy after validation/OOS and untouched final holdout.</p>
+
+            <div class="hero-metrics">
+              <div class="metric-bubble lilac"><span>Holdout</span><strong id="hero-return">—</strong></div>
+              <div class="metric-bubble sky"><span>Sharpe</span><strong id="hero-sharpe">—</strong></div>
+              <div class="metric-bubble coral"><span>Drawdown</span><strong id="hero-drawdown">—</strong></div>
+              <div class="metric-bubble mint"><span>Win rate</span><strong id="hero-winrate">—</strong></div>
+            </div>
+          </div>
+
+          <div class="planetarium" aria-hidden="true">
+            <div class="orbit orbit-1"><span class="orbit-chip chip-a">α</span></div>
+            <div class="orbit orbit-2"><span class="orbit-chip chip-b">β</span></div>
+            <div class="planet">
+              <span class="planet-shine"></span>
+              <span class="planet-band"></span>
+              <span class="planet-face"><i></i><i></i><b></b></span>
+              <span class="planet-label" id="planet-label">QS</span>
+            </div>
+            <div class="satellite sat-a">+</div>
+            <div class="satellite sat-b">◆</div>
+            <div class="satellite sat-c">✦</div>
+            <div class="planet-shadow"></div>
+          </div>
+        </article>
+
+        <aside class="score-stack">
+          <article class="score-card score-purple cartoon-surface tilt-card">
+            <span class="score-icon">◫</span>
+            <div><small>Assets researched</small><strong id="kpi-assets">—</strong><p id="kpi-assets-note">Across configured universe</p></div>
+            <i class="score-star">✦</i>
+          </article>
+          <article class="score-card score-green cartoon-surface tilt-card">
+            <span class="score-icon">↗</span>
+            <div><small>Positive holdout</small><strong id="kpi-positive">—</strong><p>Historical final-holdout share</p></div>
+            <i class="score-star">✦</i>
+          </article>
+          <article class="score-card score-yellow cartoon-surface tilt-card">
+            <span class="score-icon">✓</span>
+            <div><small>PASS strategies</small><strong id="kpi-pass">—</strong><p id="kpi-pass-note">Research-grade validation</p></div>
+            <i class="score-star">✦</i>
+          </article>
+          <article class="score-card score-pink cartoon-surface tilt-card">
+            <span class="score-icon">≈</span>
+            <div><small>Avg. holdout return</small><strong id="kpi-return">—</strong><p>Evidence, never a promise</p></div>
+            <i class="score-star">✦</i>
+          </article>
+        </aside>
       </section>
 
-      <section class="hero-grid">
-        <article class="panel chart-panel">
+      <section class="lab-grid" id="evidence">
+        <article class="chart-lab cartoon-surface tilt-card">
           <div class="panel-head">
-            <div><span>TOP VALIDATED OPPORTUNITY</span><h2 id="hero-symbol">Waiting for report</h2></div>
-            <em id="hero-verdict" class="verdict neutral">—</em>
+            <div><span class="panel-kicker">FINAL HOLDOUT FLIGHT PATH</span><h2>Equity comet</h2></div>
+            <div class="chart-legend"><span></span> selected strategy</div>
           </div>
-          <div class="hero-metrics">
-            <div><span>Holdout return</span><strong id="hero-return">—</strong></div>
-            <div><span>Sharpe</span><strong id="hero-sharpe">—</strong></div>
-            <div><span>Max drawdown</span><strong id="hero-drawdown">—</strong></div>
-            <div><span>Win rate</span><strong id="hero-winrate">—</strong></div>
-          </div>
-          <div class="chart-wrap">
+          <div class="chart-stage">
+            <div class="chart-bubble bubble-one"></div>
+            <div class="chart-bubble bubble-two"></div>
             <svg id="equity-chart" viewBox="0 0 760 250" role="img" aria-label="Final holdout equity curve">
-              <defs><linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity=".25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>
+              <defs>
+                <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#7bf7db" stop-opacity=".42"/>
+                  <stop offset="100%" stop-color="#7bf7db" stop-opacity="0"/>
+                </linearGradient>
+                <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              </defs>
               <g class="chart-grid"><line x1="0" y1="40" x2="760" y2="40"/><line x1="0" y1="100" x2="760" y2="100"/><line x1="0" y1="160" x2="760" y2="160"/><line x1="0" y1="220" x2="760" y2="220"/></g>
               <path id="area-path" class="area-path"></path>
-              <path id="line-path" class="line-path"></path>
+              <path id="line-path" class="line-path" filter="url(#glow)"></path>
             </svg>
           </div>
+          <div class="chart-caption"><span>Discovery</span><i></i><span>Validation/OOS</span><i></i><strong>Final holdout</strong></div>
         </article>
 
-        <article class="panel validation-panel">
+        <article class="evidence-tower cartoon-surface tilt-card">
           <div class="panel-head">
-            <div><span>EVIDENCE QUALITY</span><h2>Validation matrix</h2></div>
-            <small>PSR · DSR · PBO · FDR</small>
+            <div><span class="panel-kicker">EVIDENCE QUALITY</span><h2>Stat shield</h2></div>
+            <div class="shield-score"><small>median Sharpe</small><strong id="median-sharpe">—</strong></div>
           </div>
           <div id="validation-list" class="validation-list"></div>
-          <div class="validation-foot"><span>Median holdout Sharpe</span><strong id="median-sharpe">—</strong></div>
+          <div class="shield-footer"><span class="tiny-bee">✦</span><p>PSR · DSR · PBO · FDR · regime robustness</p></div>
         </article>
       </section>
 
-      <section class="panel opportunities-panel">
+      <section class="opportunity-world cartoon-surface" id="opportunities">
         <div class="panel-head table-head">
-          <div><span>UNIVERSE RESULTS</span><h2>Opportunities</h2></div>
-          <div id="filters" class="filters">
-            <button class="filter active" data-filter="ALL">All</button>
-            <button class="filter" data-filter="PASS">Pass</button>
-            <button class="filter" data-filter="REVIEW">Review</button>
-            <button class="filter" data-filter="FAIL">Fail</button>
+          <div><span class="panel-kicker">THE SURVIVING SWARM</span><h2>Opportunity fleet</h2><p>Ranked by research verdict, then final-holdout Sharpe and return.</p></div>
+          <div id="filters" class="filters" aria-label="Filter opportunities">
+            <button class="filter active" data-filter="ALL" type="button">All</button>
+            <button class="filter" data-filter="PASS" type="button">Pass</button>
+            <button class="filter" data-filter="REVIEW" type="button">Review</button>
+            <button class="filter" data-filter="FAIL" type="button">Fail</button>
           </div>
         </div>
-        <div class="table-scroll">
-          <table>
-            <thead><tr><th>#</th><th>Market</th><th>Strategy</th><th>Holdout</th><th>Sharpe</th><th>Drawdown</th><th>Win rate</th><th>Verdict</th></tr></thead>
-            <tbody id="opportunity-rows"></tbody>
-          </table>
-        </div>
+
+        <div class="fleet-header" aria-hidden="true"><span>#</span><span>Market</span><span>Strategy</span><span>Holdout</span><span>Sharpe</span><span>Drawdown</span><span>Win rate</span><span>Verdict</span></div>
+        <div id="opportunity-rows" class="fleet-list"></div>
       </section>
 
       <section class="bottom-grid">
-        <article class="panel detail-panel">
-          <div class="panel-head"><div><span>SELECTED RESEARCH</span><h2 id="detail-title">Select an opportunity</h2></div></div>
-          <div id="detail-content" class="detail-content"><p>Choose a row above to inspect its candidate event, strategy and validation evidence.</p></div>
+        <article class="detail-island cartoon-surface tilt-card">
+          <div class="panel-head"><div><span class="panel-kicker">SELECTED RESEARCH</span><h2 id="detail-title">Pick a tiny explorer</h2></div><div class="magnifier">⌕</div></div>
+          <div id="detail-content" class="detail-content"><p>Choose an opportunity to inspect its candidate signal, strategy and final-holdout evidence.</p></div>
         </article>
-        <article class="panel system-panel">
-          <div class="panel-head"><div><span>PIPELINE</span><h2>Research stages</h2></div></div>
+
+        <article class="pipeline-island cartoon-surface tilt-card" id="pipeline">
+          <div class="panel-head"><div><span class="panel-kicker">RESEARCH JOURNEY</span><h2>Swarm launch path</h2></div><div class="rocket">➜</div></div>
           <ol class="pipeline-list">
-            <li class="done"><b>01</b><div><strong>TradingView universe</strong><small>Historical closed candles</small></div></li>
-            <li class="done"><b>02</b><div><strong>Discovery scanner</strong><small>Candidate events only</small></div></li>
-            <li class="done"><b>03</b><div><strong>Agent hypotheses</strong><small>Validated Strategy DSL</small></div></li>
-            <li class="done"><b>04</b><div><strong>Validation / OOS</strong><small>Selection evidence</small></div></li>
-            <li class="active-stage"><b>05</b><div><strong>Final holdout</strong><small>Dashboard ranking source</small></div></li>
+            <li class="done"><b>1</b><div><strong>TradingView telescope</strong><small>Closed historical candles</small></div></li>
+            <li class="done"><b>2</b><div><strong>Discovery garden</strong><small>Candidate events sprout</small></div></li>
+            <li class="done"><b>3</b><div><strong>Agent workshop</strong><small>Strategy DSL hypotheses</small></div></li>
+            <li class="done"><b>4</b><div><strong>Validation canyon</strong><small>Out-of-sample selection</small></div></li>
+            <li class="active-stage"><b>5</b><div><strong>Holdout moon</strong><small>Untouched final evidence</small></div></li>
           </ol>
         </article>
       </section>
+
+      <footer class="footer-note">
+        <span>✦</span>
+        <p>Quant Swarm is a research instrument. Cartoon planets are playful; statistical gates are not.</p>
+        <span>✦</span>
+      </footer>
     </main>
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="./world.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
