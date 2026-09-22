@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   KimiResearchAgent,
   MockResearchAgent,
@@ -29,6 +30,7 @@ declare const process: {
 };
 
 const ENGINE_URL = process.env.QUANT_ENGINE_URL ?? "http://localhost:8420";
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const DEFAULT_UNIVERSE = [
   "BINANCE:BTCUSDT:4h",
   "BINANCE:ETHUSDT:4h",
@@ -48,7 +50,10 @@ async function main(): Promise<void> {
   const concurrency = integerEnv("UNIVERSE_CONCURRENCY", 2, 1, 8);
   const zThreshold = numberEnv("UNIVERSE_Z_THRESHOLD", 2.5, 0.5, 20);
   const lookbackWindow = integerEnv("SCANNER_LOOKBACK_WINDOW", 100, 10, 5000);
-  const reportPath = process.env.UNIVERSE_REPORT_PATH ?? ".data/universe-report.json";
+  const reportPath = resolve(
+    REPO_ROOT,
+    process.env.UNIVERSE_REPORT_PATH ?? ".data/universe-report.json"
+  );
 
   const provider = new TradingViewMarketDataProvider({
     token: process.env.TRADINGVIEW_SESSION_ID,
@@ -247,6 +252,16 @@ async function researchAsset(params: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (isNoViableResearchResult(message)) {
+      console.log("[universe] no viable strategy " + label + ": " + message);
+      return {
+        symbol: subscription.symbol,
+        timeframe: subscription.timeframe,
+        status: "NO_SIGNAL",
+        error: message.slice(0, 1000),
+      };
+    }
+
     console.error("[universe] failed " + label + ": " + message);
     return {
       symbol: subscription.symbol,
@@ -255,6 +270,10 @@ async function researchAsset(params: {
       error: message.slice(0, 1000),
     };
   }
+}
+
+function isNoViableResearchResult(message: string): boolean {
+  return /Research run produced \d+ successful trials; at least \d+ are required/.test(message);
 }
 
 function snapshot(result: {
