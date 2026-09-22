@@ -10,8 +10,8 @@ export interface ResearchContext {
   regime?: "trending" | "ranging" | "volatile";
   /** Other recent candidate events */
   relatedEvents?: CandidateEvent[];
-  /** Deterministically computed market-intelligence snapshot/summary */
-  marketIntelligence?: Record<string, string | number | boolean | null>;
+  /** Exact market/timeframe the hypothesis must target. */
+  targetMarket?: { symbol: string; timeframe: string };
   /** Hard research constraints supplied by the application, not the model */
   researchConstraints?: string[];
 }

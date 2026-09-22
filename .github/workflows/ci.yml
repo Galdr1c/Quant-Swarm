@@ -85,6 +85,18 @@ jobs:
         env:
           TRADINGVIEW_SMOKE_TIMEOUT_MS: "20000"
         run: pnpm run tradingview:smoke
+      - name: Run TradingView universe research smoke
+        env:
+          RESEARCH_PROVIDERS: mock,mock,mock
+          UNIVERSE_SUBSCRIPTIONS: BINANCE:BTCUSDT:1h,NASDAQ:AAPL:1d
+          UNIVERSE_HISTORY_BARS: "240"
+          UNIVERSE_CONCURRENCY: "1"
+          UNIVERSE_Z_THRESHOLD: "0.5"
+          UNIVERSE_REPORT_PATH: .data/ci-universe-report.json
+        run: |
+          pnpm run research:universe
+          test -s .data/ci-universe-report.json
+          node -e 'const r=require("./.data/ci-universe-report.json"); if(r.source!=="tradingview"||r.summary.assets!==2||r.summary.errors!==0) process.exit(1)'
       - name: Run research smoke with Postgres ledger
         env:
           RESEARCH_PROVIDERS: mock,mock,mock

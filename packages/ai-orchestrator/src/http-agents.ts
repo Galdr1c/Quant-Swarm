@@ -284,10 +284,10 @@ export function buildResearchInput(event: CandidateEvent, context: ResearchConte
     objective: "Propose one falsifiable strategy hypothesis in the supported Strategy DSL.",
     candidateEvent: event,
     marketContext: {
+      targetMarket: context.targetMarket ?? null,
       recentCandles: context.recentCandles,
       regime: context.regime ?? null,
       relatedEvents: context.relatedEvents ?? [],
-      marketIntelligence: context.marketIntelligence ?? null,
       constraints: context.researchConstraints ?? [],
     },
   });

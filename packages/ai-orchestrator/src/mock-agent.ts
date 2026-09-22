@@ -126,10 +126,16 @@ export class MockResearchAgent implements ResearchAgent {
 
   async investigate(
     event: CandidateEvent,
-    _context: ResearchContext
+    context: ResearchContext
   ): Promise<ResearchHypothesis> {
     const templateFn = TEMPLATES[event.type] ?? TEMPLATES.VOLUME_ANOMALY;
     const strategy = templateFn(event, this.variant);
+    if (context.targetMarket) {
+      strategy.market = {
+        symbol: context.targetMarket.symbol,
+        timeframe: context.targetMarket.timeframe,
+      };
+    }
 
     return {
       strategy,

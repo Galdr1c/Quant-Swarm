@@ -1,6 +1,6 @@
 {
   "name": "@quant-swarm/api",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "main": "./dist/pipeline.js",
@@ -11,7 +11,8 @@
     "pipeline": "pnpm run build:deps && tsc && node dist/pipeline.js",
     "research:run": "pnpm run build:deps && tsc && node dist/research.js",
     "live:scan": "pnpm run build:deps && tsc && node dist/live.js",
-    "tradingview:smoke": "pnpm run build:deps && tsc && node dist/tradingview-smoke.js"
+    "tradingview:smoke": "pnpm run build:deps && tsc && node dist/tradingview-smoke.js",
+    "research:universe": "pnpm run build:deps && tsc && node dist/universe.js"
   },
   "dependencies": {
     "@quant-swarm/shared": "workspace:*",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "@types/node": "^22.0.0"
   }
 }

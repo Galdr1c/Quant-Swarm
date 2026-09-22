@@ -1,8 +1,8 @@
 {
   "name": "quant-swarm",
   "private": true,
-  "version": "0.10.0",
-  "description": "AI Quant Research Platform — TradingView-only live market data, multi-agent research, deterministic backtesting, statistical validation, and sovereign risk controls",
+  "version": "0.11.0",
+  "description": "AI Quant Research Platform — TradingView multi-asset discovery, bounded AI research, deterministic validation, and a research dashboard",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
@@ -12,7 +12,9 @@
     "research:run": "pnpm --filter @quant-swarm/api run research:run",
     "live:scan": "pnpm --filter @quant-swarm/api run live:scan",
     "tradingview:smoke": "pnpm --filter @quant-swarm/api run tradingview:smoke",
-    "dev:engine": "cd services/quant-engine && python -m uvicorn src.api.server:app --reload --port 8420"
+    "dev:engine": "cd services/quant-engine && python -m uvicorn src.api.server:app --reload --port 8420",
+    "research:universe": "pnpm --filter @quant-swarm/api run research:universe",
+    "dashboard": "node apps/dashboard/server.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
