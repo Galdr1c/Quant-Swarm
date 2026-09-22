@@ -65,7 +65,8 @@ CI includes a real anonymous TradingView smoke test for crypto and stock candles
 
 ```text
 quant-swarm/
-├─ apps/api/                    # TradingView live scanner + research executor
+├─ apps/api/                    # TradingView live scanner + single/universe research executors
+├─ apps/dashboard/              # Responsive research command center
 ├─ packages/
 │  ├─ shared/                   # OHLCV + candidate contracts
 │  ├─ strategy-schema/          # Strategy DSL
@@ -120,11 +121,56 @@ Run the real anonymous TradingView smoke:
 pnpm run tradingview:smoke
 ```
 
-Run deterministic research without paid AI APIs:
+Run deterministic single-market research without paid AI APIs:
 
 ```bash
 RESEARCH_PROVIDERS=mock,mock,mock pnpm run research:run
 ```
+
+## Multi-asset universe research
+
+Research a TradingView universe across crypto, stocks, forex and commodities:
+
+```bash
+RESEARCH_PROVIDERS=mock,mock,mock \
+UNIVERSE_SUBSCRIPTIONS=BINANCE:BTCUSDT:4h,NASDAQ:NVDA:1h,OANDA:EURUSD:1h,TVC:GOLD:4h \
+pnpm run research:universe
+```
+
+For each asset Quant-Swarm:
+
+```text
+TradingView history
+→ 60% discovery / regime calibration
+→ deterministic candidate scan
+→ multi-agent Strategy DSL hypotheses
+→ 20% validation/OOS comparison
+→ selected strategy
+→ untouched 20% final holdout
+→ PSR / DSR / FDR / PBO / regime validation
+→ ranked universe report
+```
+
+The report is written to `.data/universe-report.json` by default. Ranking is evidence-first: validation verdict, then final-holdout Sharpe, then final-holdout return. **Positive holdout rate is not a probability of future profit.**
+
+### Research dashboard
+
+Start the dashboard after generating a report:
+
+```bash
+pnpm run dashboard
+```
+
+Open `http://127.0.0.1:4173`. The responsive dashboard shows:
+
+- assets researched, positive final-holdout rate, PASS count and average holdout return
+- top final-holdout equity curve
+- PSR / DSR / PBO / FDR / regime validation matrix
+- filterable opportunity table
+- strategy, candidate and selected-run details
+- persistent Shadow Mode / TradingView-only data-source status
+
+If no real report exists yet, the dashboard deliberately shows a **Demo data** badge and uses a bundled visual sample.
 
 Run tests:
 
