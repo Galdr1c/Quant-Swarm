@@ -161,16 +161,21 @@ Start the dashboard after generating a report:
 pnpm run dashboard
 ```
 
-Open `http://127.0.0.1:4173`. The responsive dashboard shows:
+Open `http://127.0.0.1:4173`. The dashboard is a responsive **cartoon 3D Research Observatory** rather than a conventional finance admin panel. It combines the same deterministic evidence with a playful visual world:
 
+- WebGL2 procedural aurora + starfield shader background with pointer parallax
+- CSS 3D perspective/tilt cards, orbiting market planet and animated research objects
+- container-query responsive composition plus mobile-specific layouts
+- same-document View Transition enhancement when supported
+- explicit reduced-motion support and CSS fallback when WebGL2 is unavailable
 - assets researched, positive final-holdout rate, PASS count and average holdout return
-- top final-holdout equity curve
-- PSR / DSR / PBO / FDR / regime validation matrix
-- filterable opportunity table
+- animated final-holdout “equity comet”
+- PSR / DSR / PBO / FDR / regime “stat shield”
+- keyboard-accessible filterable opportunity fleet
 - strategy, candidate and selected-run details
-- persistent Shadow Mode / TradingView-only data-source status
+- persistent Shadow Mode / TradingView-only source state
 
-If no real report exists yet, the dashboard deliberately shows a **Demo data** badge and uses a bundled visual sample.
+GPU effects are decorative only; research ordering and validation remain deterministic. The shader caps device pixel ratio and pauses when the page is hidden. If no real report exists yet, the dashboard deliberately shows a **Demo galaxy** badge and uses bundled visual sample data.
 
 Run tests:
 
