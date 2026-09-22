@@ -1,17 +1,22 @@
-import type { CandleSubscription } from "@quant-swarm/market-data";
+import {
+  normalizeTradingViewSymbol,
+  type CandleSubscription,
+} from "@quant-swarm/market-data";
 
 export function parseSubscriptions(raw: string): CandleSubscription[] {
-  return raw.split(",").map((item) => {
+  const subscriptions = raw.split(",").map((item) => {
     const value = item.trim();
     const separator = value.lastIndexOf(":");
     if (separator <= 0 || separator === value.length - 1) {
       throw new Error(`Invalid MARKET_SUBSCRIPTIONS item: ${item}`);
     }
-    const symbol = value.slice(0, separator).trim();
+    const symbol = normalizeTradingViewSymbol(value.slice(0, separator));
     const timeframe = value.slice(separator + 1).trim();
-    if (!symbol || !timeframe) throw new Error(`Invalid MARKET_SUBSCRIPTIONS item: ${item}`);
-    return { symbol: symbol.toUpperCase(), timeframe };
+    if (!timeframe) throw new Error(`Invalid MARKET_SUBSCRIPTIONS item: ${item}`);
+    return { symbol, timeframe };
   });
+  if (subscriptions.length === 0) throw new Error("MARKET_SUBSCRIPTIONS cannot be empty");
+  return subscriptions;
 }
 
 export function parseTradingViewSession(value: string | undefined): "regular" | "extended" | undefined {
