@@ -1,8 +1,8 @@
 {
   "name": "quant-swarm",
   "private": true,
-  "version": "0.11.0",
-  "description": "AI Quant Research Platform — TradingView multi-asset discovery, bounded AI research, deterministic validation, and a research dashboard",
+  "version": "0.12.0",
+  "description": "AI Quant Research Platform — TradingView research, deterministic validation, and a WebGL2 cartoon 3D research observatory",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
