@@ -53,6 +53,7 @@
           <p>We launch tiny strategy explorers into TradingView data, then let deterministic statistics decide which ones make it home.</p>
         </div>
         <div class="top-actions">
+          <button id="market-search-open" class="bubble-button bubble-primary" type="button"><span>⌕</span> Piyasa ara</button>
           <button id="refresh-button" class="bubble-button bubble-secondary" type="button"><span>↻</span> Refresh</button>
           <button id="run-button" class="bubble-button bubble-primary" type="button"><span>▶</span> Copy launch command</button>
         </div>
@@ -199,6 +200,52 @@
       </footer>
     </main>
   </div>
+
+  <dialog id="market-search-dialog" class="market-dialog" aria-labelledby="market-dialog-title">
+    <section class="market-dialog-card">
+      <div class="market-dialog-head">
+        <div>
+          <span class="market-dialog-kicker">TRADINGVIEW MARKET SEARCH</span>
+          <h2 id="market-dialog-title">Piyasa ara</h2>
+          <p>Sembol, şirket veya borsa ara; sonra bu oturum için araştır.</p>
+        </div>
+        <button id="market-search-close" class="market-dialog-close" type="button" aria-label="Aramayı kapat">×</button>
+      </div>
+
+      <label class="market-field-label" for="market-search-query">Arama</label>
+      <div class="market-search-fields">
+        <input id="market-search-query" type="search" autocomplete="off" placeholder="AAPL, BTCUSDT, NASDAQ…" aria-describedby="market-search-status">
+        <select id="market-search-type" aria-label="Piyasa türü">
+          <option value="">Tüm piyasalar</option>
+          <option value="stock">Hisse</option>
+          <option value="crypto">Kripto</option>
+          <option value="forex">Forex</option>
+          <option value="futures">Vadeli</option>
+          <option value="cfd">CFD</option>
+          <option value="index">Endeks</option>
+          <option value="economic">Ekonomik</option>
+        </select>
+      </div>
+
+      <p id="market-search-status" class="market-search-status" role="status" aria-live="polite">Aramak için en az 2 karakter yaz.</p>
+      <div id="market-search-results" class="market-search-results" role="list" aria-label="TradingView arama sonuçları"></div>
+
+      <div id="market-selection" class="market-selection" hidden>
+        <div class="market-selection-copy">
+          <span class="market-field-label">Seçilen piyasa</span>
+          <strong id="market-selected-label"></strong>
+        </div>
+        <label class="market-field-label" for="market-timeframe">Zaman dilimi</label>
+        <select id="market-timeframe">
+          <option value="15m">15 dakika</option>
+          <option value="1h" selected>1 saat</option>
+          <option value="4h">4 saat</option>
+          <option value="1d">1 gün</option>
+        </select>
+        <button id="market-research-button" class="bubble-button bubble-primary market-research-button" type="button" disabled>Tek Seferlik Araştır</button>
+      </div>
+    </section>
+  </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="./world.js"></script>

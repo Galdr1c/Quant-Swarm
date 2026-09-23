@@ -4,6 +4,10 @@ const state = {
   selectedIndex: 0,
 };
 
+let marketSearchTimer = null;
+let marketSearchVersion = 0;
+let selectedMarket = null;
+
 const $ = (id) => document.getElementById(id);
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const finePointer = matchMedia("(pointer: fine)").matches;
@@ -11,6 +15,15 @@ const finePointer = matchMedia("(pointer: fine)").matches;
 document.addEventListener("DOMContentLoaded", () => {
   $("refresh-button")?.addEventListener("click", () => loadReport(true));
   $("run-button")?.addEventListener("click", copyRunCommand);
+  $("market-search-open")?.addEventListener("click", openMarketSearch);
+  $("market-search-close")?.addEventListener("click", () => $("market-search-dialog")?.close());
+  $("market-search-dialog")?.addEventListener("click", (event) => {
+    if (event.target === $("market-search-dialog")) $("market-search-dialog").close();
+  });
+  $("market-search-query")?.addEventListener("input", scheduleMarketSearch);
+  $("market-search-type")?.addEventListener("change", scheduleMarketSearch);
+  $("market-timeframe")?.addEventListener("change", updateResearchAction);
+  $("market-research-button")?.addEventListener("click", runOneOffResearch);
 
   $("filters")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-filter]");
@@ -411,6 +424,164 @@ async function copyRunCommand() {
     toast("Launch commands copied ✦");
   } catch {
     toast("Run: pnpm run research:universe");
+  }
+}
+
+function openMarketSearch() {
+  const dialog = $("market-search-dialog");
+  const query = $("market-search-query");
+  if (!dialog || !query) return;
+
+  marketSearchVersion += 1;
+  clearTimeout(marketSearchTimer);
+  selectedMarket = null;
+  query.value = "";
+  $("market-search-type").value = "";
+  $("market-timeframe").value = "1h";
+  $("market-search-results").replaceChildren();
+  $("market-selection").hidden = true;
+  $("market-search-status").textContent = "Aramak için en az 2 karakter yaz.";
+  updateResearchAction();
+  dialog.showModal();
+  query.focus();
+}
+
+function scheduleMarketSearch() {
+  clearTimeout(marketSearchTimer);
+  marketSearchVersion += 1;
+  selectedMarket = null;
+  $("market-selection").hidden = true;
+  $("market-search-results").replaceChildren();
+  updateResearchAction();
+
+  const query = $("market-search-query").value.trim();
+  if (query.length < 2) {
+    $("market-search-status").textContent = "Aramak için en az 2 karakter yaz.";
+    return;
+  }
+
+  $("market-search-status").textContent = "TradingView piyasaları aranıyor…";
+  marketSearchTimer = window.setTimeout(searchTradingViewMarkets, 280);
+}
+
+async function searchTradingViewMarkets() {
+  const requestVersion = marketSearchVersion;
+  const query = $("market-search-query").value.trim();
+  const marketType = $("market-search-type").value;
+  const params = new URLSearchParams({ q: query, type: marketType });
+
+  try {
+    const response = await fetch("/api/markets/search?" + params.toString(), {
+      cache: "no-store"
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (requestVersion !== marketSearchVersion) return;
+    if (!response.ok) throw new Error(payload.error || "TradingView araması başarısız oldu.");
+
+    const results = Array.isArray(payload.results) ? payload.results : [];
+    if (results.length === 0) {
+      $("market-search-status").textContent = "Eşleşen TradingView piyasası bulunamadı.";
+      return;
+    }
+
+    const list = $("market-search-results");
+    list.replaceChildren();
+    results.forEach((market) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "market-result";
+      button.setAttribute("aria-pressed", "false");
+
+      const id = document.createElement("strong");
+      id.textContent = market.id || market.symbol || "Unknown market";
+      const details = document.createElement("span");
+      details.textContent = [
+        market.fullExchange || market.exchange,
+        market.description,
+        market.type
+      ].filter(Boolean).join(" · ");
+
+      button.append(id, details);
+      button.addEventListener("click", () => selectMarket(market, button));
+      list.append(button);
+    });
+
+    $("market-search-status").textContent = results.length + " TradingView sonucu.";
+  } catch (error) {
+    if (requestVersion !== marketSearchVersion) return;
+    $("market-search-status").textContent =
+      error instanceof Error ? error.message : "TradingView araması başarısız oldu.";
+  }
+}
+
+function selectMarket(market, button) {
+  selectedMarket = market;
+  document.querySelectorAll(".market-result").forEach((node) => {
+    const selected = node === button;
+    node.classList.toggle("selected", selected);
+    node.setAttribute("aria-pressed", String(selected));
+  });
+
+  $("market-selected-label").textContent = [
+    market.id || market.symbol,
+    market.fullExchange || market.exchange,
+    market.description
+  ].filter(Boolean).join(" · ");
+  $("market-selection").hidden = false;
+  $("market-search-status").textContent = "Piyasa seçildi. Zaman dilimini belirleyip araştırmayı başlat.";
+  updateResearchAction();
+}
+
+function updateResearchAction() {
+  const button = $("market-research-button");
+  if (!button) return;
+  button.disabled = !selectedMarket || button.getAttribute("aria-busy") === "true";
+}
+
+async function runOneOffResearch() {
+  if (!selectedMarket) return;
+  const button = $("market-research-button");
+  const dialog = $("market-search-dialog");
+  const timeframe = $("market-timeframe").value;
+  const market = selectedMarket;
+
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.textContent = "Araştırılıyor…";
+  $("market-search-status").textContent = market.id + " için TradingView verisi ve araştırma yükleniyor…";
+
+  try {
+    const response = await fetch("/api/research/once", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ symbol: market.id, timeframe })
+    });
+    const report = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(report.error || "Tek seferlik araştırma başarısız oldu.");
+    if (!Array.isArray(report.results)) throw new Error("Araştırma raporu beklenen biçimde değil.");
+
+    state.filter = "ALL";
+    state.selectedIndex = 0;
+    document.querySelectorAll(".filter").forEach((node) => {
+      node.classList.toggle("active", node.dataset.filter === "ALL");
+    });
+    transition(() => {
+      state.report = report;
+      render();
+    });
+
+    dialog.close();
+    const result = report.results[0];
+    toast(result?.status === "COMPLETED"
+      ? market.id + " araştırması tamamlandı"
+      : market.id + " araştırması: " + (result?.status || "sonuç yok"));
+  } catch (error) {
+    $("market-search-status").textContent =
+      error instanceof Error ? error.message : "Tek seferlik araştırma başarısız oldu.";
+  } finally {
+    button.removeAttribute("aria-busy");
+    button.textContent = "Tek Seferlik Araştır";
+    updateResearchAction();
   }
 }
 
