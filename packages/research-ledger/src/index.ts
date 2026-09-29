@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { Pool, type PoolConfig } from "pg";
-import type { CandidateEvent, ValidationVerdict } from "@quant-swarm/shared";
+import type {
+  CandidateEvent,
+  ValidationCheck,
+  ValidationVerdict,
+} from "@quant-swarm/shared";
 import {
   validateStrategy,
   type StrategyDefinition,
@@ -49,6 +53,32 @@ export interface ResearchTrialRecord {
 
 export type ResearchRunStatus = "RUNNING" | "COMPLETED" | "FAILED";
 
+export interface ResearchRunEvidence {
+  datasetFingerprint: string;
+  holdoutFingerprint: string;
+  annualization: number;
+  split: {
+    discovery: { observations: number; firstTimestamp: number; lastTimestamp: number };
+    validation: { observations: number; firstTimestamp: number; lastTimestamp: number };
+    finalHoldout: { observations: number; firstTimestamp: number; lastTimestamp: number };
+  };
+  finalHoldout: {
+    netReturn: number;
+    annualReturn: number;
+    sharpe: number;
+    sortino: number;
+    maxDrawdown: number;
+    profitFactor: number;
+    expectancy: number;
+    totalTrades: number;
+    winRate: number;
+  };
+  researchValidation: {
+    overallVerdict: ValidationVerdict;
+    checks: ValidationCheck[];
+  };
+}
+
 export interface ResearchRunRecord {
   schemaVersion: 1;
   runId: string;
@@ -57,6 +87,7 @@ export interface ResearchRunRecord {
   status: ResearchRunStatus;
   selectedTrialId?: string;
   error?: string;
+  evidence?: ResearchRunEvidence;
 }
 
 export interface ResearchRunFinish {
@@ -64,6 +95,7 @@ export interface ResearchRunFinish {
   updatedAt: number;
   selectedTrialId?: string;
   error?: string;
+  evidence?: ResearchRunEvidence;
 }
 
 export type ResearchAppendResult = "inserted" | "duplicate";
@@ -303,7 +335,8 @@ export class PostgresResearchLedger implements ResearchLedger {
           SET status = $2,
               updated_at_ms = $3,
               selected_trial_id = $4,
-              error = $5
+              error = $5,
+              evidence = $6::jsonb
         WHERE run_id = $1 AND status = 'RUNNING'
         RETURNING run_id`,
       [
@@ -312,6 +345,7 @@ export class PostgresResearchLedger implements ResearchLedger {
         finish.updatedAt,
         finish.selectedTrialId ?? null,
         finish.error ?? null,
+        finish.evidence ? JSON.stringify(finish.evidence) : null,
       ]
     );
     if (result.rowCount === 1) return;
@@ -326,7 +360,7 @@ export class PostgresResearchLedger implements ResearchLedger {
     validateRunId(runId);
     await this.ready;
     const result = await this.pool.query(
-      `SELECT run_id, created_at_ms, updated_at_ms, status, selected_trial_id, error
+      `SELECT run_id, created_at_ms, updated_at_ms, status, selected_trial_id, error, evidence
          FROM ${this.table("research_runs")}
         WHERE run_id = $1`,
       [runId]
@@ -341,6 +375,9 @@ export class PostgresResearchLedger implements ResearchLedger {
       status: row.status as ResearchRunStatus,
       ...(row.selected_trial_id ? { selectedTrialId: String(row.selected_trial_id) } : {}),
       ...(row.error ? { error: String(row.error) } : {}),
+      ...(row.evidence ? {
+        evidence: (typeof row.evidence === "string" ? JSON.parse(row.evidence) : row.evidence) as ResearchRunEvidence,
+      } : {}),
     };
     validateRunRecord(record);
     return record;
@@ -431,8 +468,13 @@ export class PostgresResearchLedger implements ResearchLedger {
           updated_at_ms BIGINT NOT NULL,
           status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
           selected_trial_id TEXT,
-          error TEXT
+          error TEXT,
+          evidence JSONB
         )`
+      );
+      await client.query(
+        `ALTER TABLE ${this.table("research_runs")}
+           ADD COLUMN IF NOT EXISTS evidence JSONB`
       );
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.table("research_trials")} (
@@ -673,6 +715,7 @@ export function validateRunRecord(value: unknown): asserts value is ResearchRunR
   if (record.error !== undefined && typeof record.error !== "string") {
     throw new Error("Research run error must be a string");
   }
+  if (record.evidence !== undefined) validateRunEvidence(record.evidence);
 }
 
 export function canonicalJson(value: unknown): string {
@@ -691,6 +734,7 @@ function finishRunRecord(current: ResearchRunRecord, finish: ResearchRunFinish):
     updatedAt: finish.updatedAt,
     ...(finish.selectedTrialId ? { selectedTrialId: finish.selectedTrialId } : {}),
     ...(finish.error ? { error: finish.error } : {}),
+    ...(finish.evidence ? { evidence: structuredClone(finish.evidence) } : {}),
   };
   validateRunRecord(next);
   return next;
@@ -707,13 +751,52 @@ function validateFinish(finish: ResearchRunFinish): void {
   if (finish.error !== undefined && typeof finish.error !== "string") {
     throw new Error("finishRun error must be a string");
   }
+  if (finish.evidence !== undefined) validateRunEvidence(finish.evidence);
 }
 
 function terminalRunMatches(current: ResearchRunRecord, finish: ResearchRunFinish): boolean {
   return current.status === finish.status
     && current.updatedAt === finish.updatedAt
     && (current.selectedTrialId ?? undefined) === (finish.selectedTrialId ?? undefined)
-    && (current.error ?? undefined) === (finish.error ?? undefined);
+    && (current.error ?? undefined) === (finish.error ?? undefined)
+    && canonicalJson(current.evidence ?? null) === canonicalJson(finish.evidence ?? null);
+}
+
+function validateRunEvidence(value: ResearchRunEvidence): void {
+  if (!/^[a-f0-9]{64}$/.test(value.datasetFingerprint)) {
+    throw new Error("evidence.datasetFingerprint must be a SHA-256 hex digest");
+  }
+  if (!/^[a-f0-9]{64}$/.test(value.holdoutFingerprint)) {
+    throw new Error("evidence.holdoutFingerprint must be a SHA-256 hex digest");
+  }
+  if (!Number.isFinite(value.annualization) || value.annualization <= 0) {
+    throw new Error("evidence.annualization must be positive");
+  }
+  for (const [name, range] of Object.entries(value.split)) {
+    if (!Number.isSafeInteger(range.observations) || range.observations <= 0) {
+      throw new Error(`evidence.split.${name}.observations must be positive`);
+    }
+    validateTimestamp(range.firstTimestamp, `evidence.split.${name}.firstTimestamp`);
+    validateTimestamp(range.lastTimestamp, `evidence.split.${name}.lastTimestamp`);
+    if (range.lastTimestamp < range.firstTimestamp) {
+      throw new Error(`evidence.split.${name} timestamps are reversed`);
+    }
+  }
+  for (const [name, number] of Object.entries(value.finalHoldout)) {
+    if (!Number.isFinite(number)) {
+      throw new Error(`evidence.finalHoldout.${name} must be finite`);
+    }
+  }
+  if (
+    value.researchValidation.overallVerdict !== "PASS" &&
+    value.researchValidation.overallVerdict !== "REVIEW" &&
+    value.researchValidation.overallVerdict !== "FAIL"
+  ) {
+    throw new Error("evidence.researchValidation.overallVerdict is invalid");
+  }
+  if (!Array.isArray(value.researchValidation.checks)) {
+    throw new Error("evidence.researchValidation.checks must be an array");
+  }
 }
 
 function assertRunWritable(run: ResearchRunRecord | undefined, runId: string): void {
