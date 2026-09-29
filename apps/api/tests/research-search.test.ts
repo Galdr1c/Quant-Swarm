@@ -85,6 +85,7 @@ class FakeQuantClient implements ResearchQuantClient {
       strategyId: input.id,
       netReturn: sharpe * 2,
       annualReturn: sharpe * 3,
+      annualization: 365.25 * 24 * 60,
       sharpe,
       sortino: sharpe + 0.2,
       maxDrawdown: 5,
@@ -228,6 +229,20 @@ describe("runResearchSearch", () => {
     expect(result.researchValidation.overallVerdict).toBe("PASS");
 
     await expect(runResearchSearch(params)).rejects.toThrow(/already exists/);
+  });
+
+  it("rejects hypotheses that target a different market or timeframe", async () => {
+    const ledger = new MemoryResearchLedger();
+    const quant = new FakeQuantClient();
+    const { params } = searchParams(ledger, quant, "run-target-mismatch");
+    params.context = {
+      ...params.context,
+      targetMarket: { symbol: "NASDAQ:NVDA", timeframe: "1h" },
+    };
+
+    await expect(runResearchSearch(params)).rejects.toThrow(/0 successful trials/);
+    const run = await ledger.getRun("run-target-mismatch");
+    expect(run?.status).toBe("FAILED");
   });
 
   it("marks a claimed run FAILED when deterministic research infrastructure errors", async () => {
