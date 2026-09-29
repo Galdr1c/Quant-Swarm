@@ -393,6 +393,12 @@ async function loadMarketChart() {
     state.priceCandles = Array.isArray(history.candles) ? history.candles : [];
     state.tradeMarkers = Array.isArray(trades.trades) ? trades.trades : [];
     drawPriceChart(state.priceCandles, state.tradeMarkers);
+    const latestPrice = Number(state.priceCandles.at(-1)?.close);
+    await loadPaperPortfolio(
+      symbol,
+      Number.isFinite(latestPrice) && latestPrice > 0 ? latestPrice : undefined
+    );
+    if (version !== marketChartVersion) return;
 
     const paper = state.tradeMarkers.filter((trade) => trade.mode === "paper").length;
     const live = state.tradeMarkers.filter((trade) => trade.mode === "live").length;
@@ -407,6 +413,37 @@ async function loadMarketChart() {
     $("market-chart-status").textContent =
       error instanceof Error ? error.message : "Market chart failed.";
   }
+}
+
+async function loadPaperPortfolio(symbol, price) {
+  const query = new URLSearchParams({ symbol });
+  if (price !== undefined) query.set("price", String(price));
+  try {
+    const response = await fetch("/api/portfolio?" + query.toString(), { cache: "no-store" });
+    const portfolio = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(portfolio.error || "Paper portfolio failed.");
+
+    $("paper-equity").textContent = formatNumber(portfolio.equity, 2);
+    $("paper-cash").textContent = formatNumber(portfolio.cash, 2);
+    $("paper-realized").textContent = signedNumber(portfolio.realizedPnl, 2);
+    $("paper-unrealized").textContent = signedNumber(portfolio.unrealizedPnl, 2);
+    $("paper-positions").textContent = String(
+      Array.isArray(portfolio.positions) ? portfolio.positions.length : 0
+    );
+  } catch {
+    ["paper-equity", "paper-cash", "paper-realized", "paper-unrealized", "paper-positions"]
+      .forEach((id) => {
+        const node = $(id);
+        if (node) node.textContent = "—";
+      });
+  }
+}
+
+function signedNumber(value, decimals = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  const prefix = number > 0 ? "+" : "";
+  return prefix + formatNumber(number, decimals);
 }
 
 function drawPriceChart(candles, trades) {
