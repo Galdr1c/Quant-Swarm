@@ -12,7 +12,14 @@ import {
   TradingViewMarketDataProvider,
   type CandleSubscription,
 } from "@quant-swarm/market-data";
-import { MemoryResearchLedger } from "@quant-swarm/research-ledger";
+import {
+  JsonlResearchLedger,
+  type ResearchLedger,
+} from "@quant-swarm/research-ledger";
+import {
+  LeasedPostgresResearchLedger,
+  type LeaseCapableResearchLedger,
+} from "@quant-swarm/research-ledger/leased-postgres";
 import type { CandidateEvent, OHLCV } from "@quant-swarm/shared";
 import { parseSubscriptions, parseTradingViewSession } from "./live-config.js";
 import { HttpResearchQuantClient, runResearchSearch } from "./research-search.js";
@@ -46,7 +53,7 @@ async function main(): Promise<void> {
     process.env.UNIVERSE_SUBSCRIPTIONS ?? DEFAULT_UNIVERSE
   );
   const historyBars = integerEnv("UNIVERSE_HISTORY_BARS", 800, 240, 5000);
-  const concurrency = integerEnv("UNIVERSE_CONCURRENCY", 2, 1, 8);
+  const requestedConcurrency = integerEnv("UNIVERSE_CONCURRENCY", 2, 1, 8);
   const zThreshold = numberEnv("UNIVERSE_Z_THRESHOLD", 2.5, 0.5, 20);
   const lookbackWindow = integerEnv("SCANNER_LOOKBACK_WINDOW", 100, 10, 5000);
   const reportPath = resolve(
@@ -63,27 +70,36 @@ async function main(): Promise<void> {
   const quant = new HttpResearchQuantClient(ENGINE_URL);
   const agents = createAgents(process.env.RESEARCH_PROVIDERS ?? "mock,mock,mock");
   const startedAt = Date.now();
+  const { ledger, backend } = createUniverseLedger();
+  const concurrency = backend === "jsonl" ? 1 : requestedConcurrency;
 
   console.log(
     "[universe] source=TradingView assets=" + subscriptions.length +
-    " historyBars=" + historyBars + " concurrency=" + concurrency
+    " historyBars=" + historyBars + " concurrency=" + concurrency +
+    " ledger=" + backend
   );
 
-  const results = await mapWithConcurrency(
-    subscriptions,
-    concurrency,
-    async (subscription, index) => researchAsset({
-      subscription,
-      index,
-      provider,
-      quant,
-      agents,
-      historyBars,
-      zThreshold,
-      lookbackWindow,
-      startedAt,
-    })
-  );
+  let results: UniverseResearchResult[];
+  try {
+    results = await mapWithConcurrency(
+      subscriptions,
+      concurrency,
+      async (subscription, index) => researchAsset({
+        subscription,
+        index,
+        provider,
+        quant,
+        agents,
+        ledger,
+        historyBars,
+        zThreshold,
+        lookbackWindow,
+        startedAt,
+      })
+    );
+  } finally {
+    await ledger.close?.();
+  }
 
   const report = buildUniverseReport(results);
   await mkdir(dirname(reportPath), { recursive: true });
@@ -117,6 +133,7 @@ async function researchAsset(params: {
   provider: TradingViewMarketDataProvider;
   quant: HttpResearchQuantClient;
   agents: readonly ResearchAgent[];
+  ledger: ResearchLedger | LeaseCapableResearchLedger;
   historyBars: number;
   zThreshold: number;
   lookbackWindow: number;
@@ -192,11 +209,13 @@ async function researchAsset(params: {
       regimeCalibrationCandles: split.discovery,
       validationCandles: split.validation,
       finalHoldoutCandles: split.holdout,
-      ledger: new MemoryResearchLedger(),
+      ledger: params.ledger,
       quant: params.quant,
       options: {
         runId,
         ...(annualization !== undefined ? { annualization } : {}),
+        allowIdenticalHoldoutReuse:
+          process.env.RESEARCH_ALLOW_HOLDOUT_REUSE === "true",
         coordinator: {
           maxConcurrency: integerEnv("RESEARCH_MAX_CONCURRENCY", 3, 1, 16),
           timeoutMs: integerEnv("RESEARCH_AGENT_TIMEOUT_MS", 90_000, 1000, 600_000),
@@ -234,6 +253,7 @@ async function researchAsset(params: {
       timeframe: subscription.timeframe,
       status: "COMPLETED",
       runId,
+      datasetIdentity: result.datasetIdentity,
       candidate: {
         type: event.type,
         score: event.score,
@@ -326,6 +346,37 @@ function recentContext(candles: OHLCV[], event: CandidateEvent): OHLCV[] {
   const index = candles.findIndex((candle) => candle.timestamp === event.timestamp);
   if (index < 0) return candles.slice(-300);
   return candles.slice(Math.max(0, index - 299), index + 1);
+}
+
+type UniverseRuntimeLedger = ResearchLedger | LeaseCapableResearchLedger;
+
+function createUniverseLedger(): {
+  ledger: UniverseRuntimeLedger;
+  backend: "jsonl" | "postgres";
+} {
+  const backend = (process.env.RESEARCH_LEDGER_BACKEND ?? "jsonl").trim().toLowerCase();
+  if (backend === "jsonl") {
+    return {
+      backend,
+      ledger: new JsonlResearchLedger(
+        process.env.RESEARCH_LEDGER_PATH ?? ".data/research-ledger.jsonl"
+      ),
+    };
+  }
+  if (backend === "postgres") {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString?.trim()) {
+      throw new Error("DATABASE_URL is required when RESEARCH_LEDGER_BACKEND=postgres");
+    }
+    return {
+      backend,
+      ledger: new LeasedPostgresResearchLedger({
+        connectionString,
+        schema: process.env.RESEARCH_POSTGRES_SCHEMA ?? "quant_swarm",
+      }),
+    };
+  }
+  throw new Error("Unsupported RESEARCH_LEDGER_BACKEND: " + backend);
 }
 
 function createAgents(raw: string): ResearchAgent[] {
