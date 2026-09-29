@@ -214,6 +214,28 @@ h1 em{font-style:normal;color:#ffe57f;-webkit-text-stroke:1px rgba(33,24,63,.5)}
 .paper-portfolio-strip strong{
   display:block;margin-top:3px;font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis
 }
+.paper-trade-panel{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(100px,130px) auto;
+  align-items:end;gap:10px;margin-top:10px;padding:10px 11px;border:2px dashed rgba(33,24,63,.62);
+  border-radius:14px;background:rgba(255,246,181,.45)
+}
+.paper-trade-panel>div:first-child{display:flex;flex-direction:column;gap:3px}
+.paper-trade-panel>div:first-child>strong{font-size:11px;color:var(--ink)}
+.paper-trade-panel>div:first-child>small{font-size:7px;color:#71678d;font-weight:800}
+.paper-qty-label{display:flex;flex-direction:column;gap:4px;font-size:7px;font-weight:1000;color:#71678d;text-transform:uppercase}
+.paper-qty-label input{
+  width:100%;min-height:36px;padding:7px 9px;border:2px solid var(--ink);border-radius:10px;
+  background:#fff;color:var(--ink);font:inherit;font-size:10px;font-weight:900
+}
+.paper-order-buttons{display:flex;gap:7px;align-items:center}
+.paper-order-buttons button{
+  min-height:36px;padding:7px 10px;border:2px solid var(--ink);border-radius:11px;
+  font:inherit;font-size:8px;font-weight:1000;color:var(--ink);cursor:pointer;
+  box-shadow:0 3px 0 rgba(33,24,63,.7)
+}
+#paper-buy-button{background:#8ff0c9}
+#paper-sell-button{background:#ffb0ba}
+.paper-order-buttons button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
 .shield-score{border:2px solid var(--ink);border-radius:15px;background:var(--yellow);padding:7px 10px;box-shadow:0 4px 0 var(--ink);transform:rotate(2deg)}.shield-score small{display:block;font-size:6px;text-transform:uppercase}.shield-score strong{font-size:17px}
 .validation-list{display:grid;gap:9px;margin-top:18px}.validation-row{
   display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 11px;border:2px solid var(--ink);border-radius:16px;background:rgba(255,255,255,.72);box-shadow:0 3px 0 rgba(33,24,63,.8)
@@ -348,4 +370,7 @@ h1 em{font-style:normal;color:#ffe57f;-webkit-text-stroke:1px rgba(33,24,63,.5)}
   .market-chart-research{width:100%}
   .market-chart-footer{align-items:flex-start;flex-direction:column}
   .paper-portfolio-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .paper-trade-panel{grid-template-columns:1fr}
+  .paper-order-buttons{width:100%}
+  .paper-order-buttons button{flex:1}
 }
