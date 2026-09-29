@@ -28,6 +28,8 @@ DEFAULT_RESEARCH_THRESHOLDS = {
     "min_regime_positive_fraction": 0.60,
     "min_regimes": 3,
     "min_equity_returns": 30,
+    "min_cv_positive_fraction": 0.60,
+    "min_cv_median_sharpe": 0.0,
 }
 
 
@@ -201,39 +203,101 @@ def validate_research(
     cv = evidence.get("purgedCv", evidence.get("purged_cv"))
     if isinstance(cv, dict) and int(cv.get("nObservations", 0)) >= 2:
         try:
+            n_observations = int(cv["nObservations"])
+            n_splits = int(cv.get("nSplits", 5))
+            purge_bars = int(cv.get("purgeBars", 0))
+            embargo_bars = int(cv.get("embargoBars", 0))
             splits = purged_kfold_splits(
-                n_samples=int(cv["nObservations"]),
-                n_splits=int(cv.get("nSplits", 5)),
-                purge=int(cv.get("purgeBars", 0)),
-                embargo=int(cv.get("embargoBars", 0)),
+                n_samples=n_observations,
+                n_splits=n_splits,
+                purge=purge_bars,
+                embargo=embargo_bars,
             )
             min_train = min(len(split.train_indices) for split in splits)
-            checks.append(
-                ValidationCheck(
-                    name="purged_embargoed_cv_plan",
-                    verdict="PASS" if min_train > 0 else "FAIL",
-                    value=min_train,
-                    threshold=1,
-                    detail=(
-                        f"{len(splits)} folds; purge={int(cv.get('purgeBars', 0))} bars; "
-                        f"embargo={int(cv.get('embargoBars', 0))} bars."
-                    ),
+
+            folds = cv.get("folds")
+            evaluated_folds = int(cv.get("evaluatedFolds", 0))
+            if not isinstance(folds, list) or not folds or evaluated_folds != len(folds):
+                checks.append(
+                    ValidationCheck(
+                        name="purged_embargoed_cv",
+                        verdict="REVIEW",
+                        value=float(evaluated_folds),
+                        threshold=float(n_splits),
+                        detail=(
+                            "Purged split plan exists, but fold-level deterministic "
+                            "backtest evidence is incomplete."
+                        ),
+                    )
                 )
-            )
+            elif len(folds) != n_splits:
+                checks.append(
+                    ValidationCheck(
+                        name="purged_embargoed_cv",
+                        verdict="REVIEW",
+                        value=float(len(folds)),
+                        threshold=float(n_splits),
+                        detail="Not every requested purged fold was evaluated.",
+                    )
+                )
+            else:
+                fold_sharpes = [float(fold["sharpe"]) for fold in folds]
+                fold_returns = [float(fold["netReturn"]) for fold in folds]
+                if not all(math.isfinite(value) for value in fold_sharpes + fold_returns):
+                    raise ValueError("purged CV fold metrics must be finite")
+
+                positive_fraction = float(cv.get(
+                    "positiveSharpeFraction",
+                    sum(value > 0 for value in fold_sharpes) / len(fold_sharpes),
+                ))
+                sorted_sharpes = sorted(fold_sharpes)
+                midpoint = len(sorted_sharpes) // 2
+                if len(sorted_sharpes) % 2:
+                    median_sharpe = sorted_sharpes[midpoint]
+                else:
+                    median_sharpe = (
+                        sorted_sharpes[midpoint - 1] + sorted_sharpes[midpoint]
+                    ) / 2.0
+
+                min_fraction = float(cfg["min_cv_positive_fraction"])
+                min_median = float(cfg["min_cv_median_sharpe"])
+                passed = (
+                    min_train > 0
+                    and positive_fraction >= min_fraction
+                    and median_sharpe >= min_median
+                )
+                checks.append(
+                    ValidationCheck(
+                        name="purged_embargoed_cv",
+                        verdict="PASS" if passed else "FAIL",
+                        value=round(positive_fraction, 6),
+                        threshold=min_fraction,
+                        detail=(
+                            f"{len(folds)} deterministic test folds; "
+                            f"median Sharpe={median_sharpe:.4f}; "
+                            f"mean net return={sum(fold_returns) / len(fold_returns):.4f}%; "
+                            f"minimum train observations={min_train}; "
+                            f"purge={purge_bars}; embargo={embargo_bars}."
+                        ),
+                    )
+                )
         except (TypeError, ValueError, KeyError) as exc:
             checks.append(
                 ValidationCheck(
-                    name="purged_embargoed_cv_plan",
+                    name="purged_embargoed_cv",
                     verdict="REVIEW",
-                    detail=f"Could not construct purged CV plan: {exc}",
+                    detail=f"Could not evaluate purged fold backtests: {exc}",
                 )
             )
     else:
         checks.append(
             ValidationCheck(
-                name="purged_embargoed_cv_plan",
+                name="purged_embargoed_cv",
                 verdict="REVIEW",
-                detail="Requires purgedCv.nObservations; purge/embargo should match label horizon.",
+                detail=(
+                    "Requires purgedCv split metadata plus deterministic fold-level "
+                    "backtest metrics."
+                ),
             )
         )
 
