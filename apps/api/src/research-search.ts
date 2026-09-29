@@ -55,7 +55,11 @@ export interface RegimeReturnEvidence {
 }
 
 export interface ResearchQuantClient {
-  backtest(strategy: StrategyDefinition, candles: OHLCV[]): Promise<BacktestWithEquity>;
+  backtest(
+    strategy: StrategyDefinition,
+    candles: OHLCV[],
+    annualization?: number
+  ): Promise<BacktestWithEquity>;
   psr(equityCurve: number[], annualization: number): Promise<PsrEvidence>;
   calibrateRegimes(
     candles: OHLCV[],
@@ -223,7 +227,11 @@ export async function runResearchSearch(params: {
         const strategy = row.hypothesis.strategy;
         try {
           assertStrategyTarget(strategy, context.targetMarket);
-          const backtest = await quant.backtest(strategy, validationCandles);
+          const backtest = await quant.backtest(
+            strategy,
+            validationCandles,
+            options.annualization
+          );
           const annualization = positiveFinite(
             backtest.annualization,
             inferAnnualization(validationCandles)
@@ -313,7 +321,11 @@ export async function runResearchSearch(params: {
     }
 
     const validationBacktest = selected.backtest;
-    const finalHoldoutBacktest = await quant.backtest(selectedStrategy, finalHoldoutCandles);
+    const finalHoldoutBacktest = await quant.backtest(
+      selectedStrategy,
+      finalHoldoutCandles,
+      options.annualization
+    );
     await heartbeat?.ensure();
 
     const records = (await ledger.list(options.runId)).filter(
@@ -376,8 +388,18 @@ export async function runResearchSearch(params: {
 export class HttpResearchQuantClient implements ResearchQuantClient {
   constructor(private readonly engineUrl = "http://localhost:8420") {}
 
-  backtest(strategy: StrategyDefinition, candles: OHLCV[]): Promise<BacktestWithEquity> {
-    return this.post<BacktestWithEquity>("/backtest", { strategy, candles });
+  backtest(
+    strategy: StrategyDefinition,
+    candles: OHLCV[],
+    annualization?: number
+  ): Promise<BacktestWithEquity> {
+    return this.post<BacktestWithEquity>("/backtest", {
+      strategy,
+      candles,
+      ...(annualization !== undefined
+        ? { config: { candles_per_year: annualization } }
+        : {}),
+    });
   }
 
   psr(equityCurve: number[], annualization: number): Promise<PsrEvidence> {
