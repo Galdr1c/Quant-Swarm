@@ -20,6 +20,7 @@ def compute_indicator(
     low: NDArray,
     close: NDArray,
     volume: NDArray,
+    timestamps: NDArray | None = None,
 ) -> NDArray:
     """Compute a single indicator from its DSL definition."""
     ind_type = indicator_def["type"]
@@ -37,9 +38,15 @@ def compute_indicator(
         fast = int(params.get("fastLength", params.get("length", 12)))
         slow = int(params.get("slowLength", 26))
         signal = int(params.get("signalLength", 9))
-        macd_line, _, histogram = macd(close, fast, slow, signal)
-        # Return histogram as the primary MACD value for rule comparison
-        return histogram
+        macd_line, signal_line, histogram = macd(close, fast, slow, signal)
+        component = str(params.get("component", "histogram")).lower()
+        if component == "line":
+            return macd_line
+        if component == "signal":
+            return signal_line
+        if component == "histogram":
+            return histogram
+        raise ValueError(f"Unsupported MACD component: {component}")
     elif ind_type == "SUPERTREND":
         factor = float(params.get("factor", 3.0))
         atr_len = int(params.get("atrLength", 10))
@@ -48,11 +55,54 @@ def compute_indicator(
         length = int(params.get("length", 20))
         std = float(params.get("stddev", 2.0))
         upper, middle, lower = bollinger_bands(close, length, std)
-        return middle  # Return middle band as primary
+        component = str(params.get("component", "middle")).lower()
+        if component == "upper":
+            return upper
+        if component == "middle":
+            return middle
+        if component == "lower":
+            return lower
+        raise ValueError(f"Unsupported BBANDS component: {component}")
     elif ind_type == "VWAP":
-        cum_vp = np.cumsum(close * volume)
-        cum_v = np.cumsum(volume)
-        return np.where(cum_v > 0, cum_vp / cum_v, close)
+        source = str(params.get("source", "close")).lower()
+        if source == "close":
+            price = close
+        elif source == "hlc3":
+            price = (high + low + close) / 3.0
+        elif source == "ohlc4":
+            price = (open_arr + high + low + close) / 4.0
+        else:
+            raise ValueError(f"Unsupported VWAP source: {source}")
+
+        reset = str(params.get("reset", "continuous")).lower()
+        if reset == "continuous":
+            cum_vp = np.cumsum(price * volume)
+            cum_v = np.cumsum(volume)
+            return np.where(cum_v > 0, cum_vp / cum_v, price)
+
+        if reset == "utc_day":
+            if timestamps is None or len(timestamps) != len(close):
+                raise ValueError("VWAP reset=utc_day requires candle timestamps")
+            result = np.full_like(close, np.nan, dtype=np.float64)
+            day_ms = 86_400_000
+            day_ids = np.asarray(timestamps, dtype=np.int64) // day_ms
+            start = 0
+            while start < len(close):
+                end = start + 1
+                while end < len(close) and day_ids[end] == day_ids[start]:
+                    end += 1
+                day_volume = volume[start:end]
+                cum_vp = np.cumsum(price[start:end] * day_volume)
+                cum_v = np.cumsum(day_volume)
+                result[start:end] = np.where(
+                    cum_v > 0,
+                    cum_vp / cum_v,
+                    price[start:end],
+                )
+                start = end
+            return result
+
+        raise ValueError(f"Unsupported VWAP reset: {reset}")
     else:
         raise ValueError(f"Unknown indicator type: {ind_type}")
 
@@ -148,6 +198,7 @@ def generate_signals(
     low: NDArray,
     close: NDArray,
     volume: NDArray,
+    timestamps: NDArray | None = None,
 ) -> tuple[NDArray, NDArray]:
     """
     Generate entry and exit signal arrays from a strategy definition.
@@ -158,7 +209,7 @@ def generate_signals(
     indicators: dict[str, NDArray] = {}
     for ind_def in strategy["indicators"]:
         indicators[ind_def["id"]] = compute_indicator(
-            ind_def, open_arr, high, low, close, volume
+            ind_def, open_arr, high, low, close, volume, timestamps
         )
 
     entry_signals = evaluate_rule_group(strategy["entry"], indicators, close)
