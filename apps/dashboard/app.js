@@ -2,10 +2,15 @@ const state = {
   report: null,
   filter: "ALL",
   selectedIndex: 0,
+  chartSymbol: null,
+  chartTimeframe: "1h",
+  priceCandles: [],
+  tradeMarkers: [],
 };
 
 let marketSearchTimer = null;
 let marketSearchVersion = 0;
+let marketChartVersion = 0;
 let selectedMarket = null;
 
 const $ = (id) => document.getElementById(id);
@@ -24,6 +29,14 @@ document.addEventListener("DOMContentLoaded", () => {
   $("market-search-type")?.addEventListener("change", scheduleMarketSearch);
   $("market-timeframe")?.addEventListener("change", updateResearchAction);
   $("market-research-button")?.addEventListener("click", runOneOffResearch);
+  $("chart-timeframes")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-chart-timeframe]");
+    if (!button || !state.chartSymbol) return;
+    state.chartTimeframe = button.dataset.chartTimeframe;
+    syncChartControls();
+    loadMarketChart();
+  });
+  $("chart-research-button")?.addEventListener("click", runChartResearch);
 
   $("filters")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-filter]");
@@ -114,6 +127,9 @@ function render() {
 
   if (selected) {
     renderDetail(selected, state.selectedIndex);
+    selectChartMarket(selected);
+  } else {
+    clearMarketChart();
   }
 }
 
@@ -128,7 +144,6 @@ function renderHero(row) {
     $("planet-label").textContent = "QS";
     setVerdict($("hero-verdict"), null);
     card?.removeAttribute("data-verdict");
-    drawEquity([]);
     return;
   }
 
@@ -142,7 +157,6 @@ function renderHero(row) {
   setVerdict($("hero-verdict"), row.verdict);
 
   if (card) card.dataset.verdict = row.verdict || "NEUTRAL";
-  drawEquity(row.equityCurve || []);
 }
 
 function renderValidation(row) {
@@ -257,6 +271,8 @@ function selectRow(row, index, node) {
       renderValidation(row);
     }
   });
+
+  if (row.status === "COMPLETED") selectChartMarket(row);
 }
 
 function renderDetail(row, index) {
@@ -292,38 +308,176 @@ function detail(label, value) {
   );
 }
 
-function drawEquity(values) {
-  const line = $("line-path");
-  const area = $("area-path");
-  if (!line || !area) return;
+function selectChartMarket(row) {
+  if (!row?.symbol) return clearMarketChart();
+  state.chartSymbol = row.symbol;
+  state.chartTimeframe = supportedChartTimeframe(row.timeframe)
+    ? row.timeframe
+    : state.chartTimeframe;
+  syncChartControls();
+  loadMarketChart();
+}
 
-  if (!Array.isArray(values) || values.length < 2) {
+function supportedChartTimeframe(value) {
+  return ["5m", "15m", "1h", "4h", "1d"].includes(value);
+}
+
+function syncChartControls() {
+  const symbol = state.chartSymbol;
+  $("market-chart-symbol").textContent = symbol
+    ? shortSymbol(symbol) + " · " + state.chartTimeframe
+    : "Select a market";
+
+  document.querySelectorAll("[data-chart-timeframe]").forEach((button) => {
+    const active = button.dataset.chartTimeframe === state.chartTimeframe;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+
+  const analyze = $("chart-research-button");
+  if (analyze) {
+    analyze.disabled = !symbol || analyze.getAttribute("aria-busy") === "true";
+    if (analyze.getAttribute("aria-busy") !== "true") {
+      analyze.textContent = "Analyze " + state.chartTimeframe;
+    }
+  }
+}
+
+function clearMarketChart() {
+  marketChartVersion += 1;
+  state.chartSymbol = null;
+  state.priceCandles = [];
+  state.tradeMarkers = [];
+  $("price-line-path")?.setAttribute("d", "");
+  $("price-area-path")?.setAttribute("d", "");
+  $("trade-marker-layer")?.replaceChildren();
+  $("market-chart-status").textContent = "Select an opportunity to load TradingView prices.";
+  syncChartControls();
+}
+
+async function loadMarketChart() {
+  const symbol = state.chartSymbol;
+  const timeframe = state.chartTimeframe;
+  if (!symbol || !supportedChartTimeframe(timeframe)) return;
+
+  const version = ++marketChartVersion;
+  $("market-chart-status").textContent =
+    shortSymbol(symbol) + " " + timeframe + " prices loading…";
+  syncChartControls();
+
+  const historyQuery = new URLSearchParams({
+    symbol,
+    timeframe,
+    limit: "300",
+  });
+  const tradesQuery = new URLSearchParams({ symbol });
+
+  try {
+    const [historyResponse, tradesResponse] = await Promise.all([
+      fetch("/api/market/history?" + historyQuery.toString(), { cache: "no-store" }),
+      fetch("/api/trades?" + tradesQuery.toString(), { cache: "no-store" }),
+    ]);
+    const history = await historyResponse.json().catch(() => ({}));
+    const trades = await tradesResponse.json().catch(() => ({}));
+    if (version !== marketChartVersion) return;
+    if (!historyResponse.ok) throw new Error(history.error || "Price history could not be loaded.");
+    if (!tradesResponse.ok) throw new Error(trades.error || "Trade markers could not be loaded.");
+
+    state.priceCandles = Array.isArray(history.candles) ? history.candles : [];
+    state.tradeMarkers = Array.isArray(trades.trades) ? trades.trades : [];
+    drawPriceChart(state.priceCandles, state.tradeMarkers);
+
+    const paper = state.tradeMarkers.filter((trade) => trade.mode === "paper").length;
+    const live = state.tradeMarkers.filter((trade) => trade.mode === "live").length;
+    $("market-chart-status").textContent =
+      timeframe + " · " + state.priceCandles.length + " closed bars · " +
+      paper + " paper trades · " + live + " live trades";
+  } catch (error) {
+    if (version !== marketChartVersion) return;
+    state.priceCandles = [];
+    state.tradeMarkers = [];
+    drawPriceChart([], []);
+    $("market-chart-status").textContent =
+      error instanceof Error ? error.message : "Market chart failed.";
+  }
+}
+
+function drawPriceChart(candles, trades) {
+  const line = $("price-line-path");
+  const area = $("price-area-path");
+  const layer = $("trade-marker-layer");
+  if (!line || !area || !layer) return;
+
+  layer.replaceChildren();
+  const rows = (Array.isArray(candles) ? candles : [])
+    .map((row) => ({
+      timestamp: Number(row.timestamp),
+      close: Number(row.close),
+    }))
+    .filter((row) => Number.isFinite(row.timestamp) && Number.isFinite(row.close))
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  if (rows.length < 2) {
     line.setAttribute("d", "");
     area.setAttribute("d", "");
     return;
   }
 
-  const finite = values.map(Number).filter(Number.isFinite);
-  if (finite.length < 2) return;
-
   const width = 760;
   const top = 22;
   const bottom = 228;
-  const min = Math.min(...finite);
-  const max = Math.max(...finite);
-  const range = Math.max(max - min, Math.abs(max) * 0.005, 1);
+  const firstTs = rows[0].timestamp;
+  const lastTs = rows.at(-1).timestamp;
+  const visibleTrades = (Array.isArray(trades) ? trades : [])
+    .map((trade) => ({ ...trade, timestamp: Number(trade.timestamp), price: Number(trade.price) }))
+    .filter((trade) =>
+      Number.isFinite(trade.timestamp) &&
+      Number.isFinite(trade.price) &&
+      trade.timestamp >= firstTs &&
+      trade.timestamp <= lastTs
+    );
 
-  const points = finite.map((value, index) => [
-    (index / (finite.length - 1)) * width,
-    bottom - ((value - min) / range) * (bottom - top),
-  ]);
+  const priceValues = rows.map((row) => row.close).concat(visibleTrades.map((trade) => trade.price));
+  const min = Math.min(...priceValues);
+  const max = Math.max(...priceValues);
+  const range = Math.max(max - min, Math.abs(max) * 0.002, 1e-9);
+  const timeRange = Math.max(lastTs - firstTs, 1);
 
+  const xFor = (timestamp) => ((timestamp - firstTs) / timeRange) * width;
+  const yFor = (price) => bottom - ((price - min) / range) * (bottom - top);
+  const points = rows.map((row) => [xFor(row.timestamp), yFor(row.close)]);
   const path = points
     .map(([x, y], index) => (index === 0 ? "M " : "L ") + x.toFixed(2) + " " + y.toFixed(2))
     .join(" ");
 
   line.setAttribute("d", path);
   area.setAttribute("d", path + " L " + width + " " + bottom + " L 0 " + bottom + " Z");
+
+  visibleTrades.forEach((trade) => {
+    const x = xFor(trade.timestamp);
+    const y = yFor(trade.price);
+    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    group.setAttribute(
+      "class",
+      "trade-marker " + trade.mode + " " + String(trade.side).toLowerCase()
+    );
+    group.setAttribute("transform", "translate(" + x.toFixed(2) + " " + y.toFixed(2) + ")");
+
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    marker.setAttribute(
+      "d",
+      trade.side === "BUY"
+        ? "M 0 -9 L -7 6 L 7 6 Z"
+        : "M 0 9 L -7 -6 L 7 -6 Z"
+    );
+
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent =
+      trade.mode.toUpperCase() + " " + trade.side + " · " +
+      formatNumber(trade.price, 4) + " · " + formatDate(trade.timestamp);
+    group.append(marker, title);
+    layer.append(group);
+  });
 
   if (!reduceMotion && typeof line.animate === "function") {
     const length = line.getTotalLength?.() || 0;
@@ -332,9 +486,60 @@ function drawEquity(values) {
       line.style.strokeDashoffset = String(length);
       line.animate(
         [{ strokeDashoffset: length }, { strokeDashoffset: 0 }],
-        { duration: 900, easing: "cubic-bezier(.16,.84,.24,1)", fill: "forwards" }
+        { duration: 700, easing: "cubic-bezier(.16,.84,.24,1)", fill: "forwards" }
       );
     }
+  }
+}
+
+async function runChartResearch() {
+  const symbol = state.chartSymbol;
+  const timeframe = state.chartTimeframe;
+  const button = $("chart-research-button");
+  if (!symbol || !button) return;
+
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.textContent = "Analyzing…";
+  $("market-chart-status").textContent =
+    shortSymbol(symbol) + " " + timeframe + " research running…";
+
+  try {
+    const response = await fetch("/api/research/once", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ symbol, timeframe }),
+    });
+    const report = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(report.error || "Research failed.");
+    if (!Array.isArray(report.results)) throw new Error("Research report has an invalid shape.");
+
+    state.filter = "ALL";
+    state.selectedIndex = 0;
+    document.querySelectorAll(".filter").forEach((node) => {
+      node.classList.toggle("active", node.dataset.filter === "ALL");
+    });
+    transition(() => {
+      state.report = report;
+      render();
+    });
+
+    state.chartSymbol = symbol;
+    state.chartTimeframe = timeframe;
+    syncChartControls();
+    loadMarketChart();
+    const result = report.results[0];
+    toast(
+      result?.status === "COMPLETED"
+        ? shortSymbol(symbol) + " " + timeframe + " analysis complete"
+        : shortSymbol(symbol) + " " + timeframe + ": " + (result?.status || "no result")
+    );
+  } catch (error) {
+    $("market-chart-status").textContent =
+      error instanceof Error ? error.message : "Research failed.";
+  } finally {
+    button.removeAttribute("aria-busy");
+    syncChartControls();
   }
 }
 
