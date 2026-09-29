@@ -67,9 +67,9 @@ async function loadReport(showRefreshToast) {
     });
 
     if (showRefreshToast) {
-      toast(report.demo ? "Demo galaxy refreshed" : "Research universe refreshed");
+      toast(report.demo ? "Demo dataset refreshed" : "Research universe refreshed");
     } else if (report.demo) {
-      toast("Demo galaxy loaded — run research:universe for real evidence");
+      toast("Demo dataset loaded — run research:universe for real evidence");
     }
   } catch (error) {
     toast(error instanceof Error ? error.message : String(error));
@@ -125,7 +125,7 @@ function renderHero(row) {
     ["hero-return", "hero-sharpe", "hero-drawdown", "hero-winrate"].forEach((id) => {
       $(id).textContent = "—";
     });
-    $("planet-label").textContent = "QS";
+    $("core-label").textContent = "QS";
     setVerdict($("hero-verdict"), null);
     card?.removeAttribute("data-verdict");
     drawEquity([]);
@@ -134,7 +134,7 @@ function renderHero(row) {
 
   const label = shortSymbol(row.symbol);
   $("hero-symbol").textContent = label + " · " + row.timeframe;
-  $("planet-label").textContent = planetMonogram(label);
+  $("core-label").textContent = planetMonogram(label);
   $("hero-return").textContent = formatSignedPercent(row.finalHoldout?.netReturn, 2);
   $("hero-sharpe").textContent = formatNumber(row.finalHoldout?.sharpe, 2);
   $("hero-drawdown").textContent = formatSignedPercent(row.finalHoldout?.maxDrawdown, 2);
@@ -241,7 +241,7 @@ function renderFleet() {
 
   if (!rows.length) {
     root.innerHTML =
-      '<div class="empty-row">No tiny explorers live in this filter yet.</div>';
+      '<div class="empty-row">No research candidates match this filter.</div>';
   }
 }
 
@@ -279,7 +279,7 @@ function renderDetail(row, index) {
     escapeHtml(row.selectedStrategy?.name || statusLabel(row.status)) +
     "</strong><br>" +
     (row.runId ? "Run: " + escapeHtml(row.runId) + "<br>" : "") +
-    "The cartoon fleet is decorative. Ranking still uses verdict first, then untouched final-holdout Sharpe and return — never a promise of future profitability.</div>";
+    "The visual layer is explanatory only. Ranking still uses verdict first, then untouched final-holdout Sharpe and return — never a promise of future profitability.</div>";
 }
 
 function detail(label, value) {
@@ -341,7 +341,7 @@ function drawEquity(values) {
 function installTilt() {
   if (!finePointer || reduceMotion) return;
 
-  const maxTilt = 5.5;
+  const maxTilt = 2.2;
   document.querySelectorAll(".tilt-card").forEach((card) => {
     let frame = 0;
 
@@ -421,7 +421,7 @@ async function copyRunCommand() {
 
   try {
     await navigator.clipboard.writeText(command);
-    toast("Launch commands copied ✦");
+    toast("Launch commands copied");
   } catch {
     toast("Run: pnpm run research:universe");
   }
