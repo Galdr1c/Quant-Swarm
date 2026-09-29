@@ -2,6 +2,32 @@
 
 **AI Quant Research Platform** — TradingView-only market data, deterministic scanning/backtesting/statistics, bounded AI strategy research, an auditable research ledger, and an AI-independent risk layer.
 
+
+### Price chart and trade markers
+
+The dashboard can load closed TradingView candles for the selected market at **5m, 15m, 1h, 4h, or 1d**. Changing the chart timeframe changes the price series immediately; **Analyze <timeframe>** runs the one-off research pipeline for that exact market/timeframe.
+
+Paper/live fills are rendered on the price line when `QUANT_TRADES_PATH` points to a JSON file shaped like:
+
+```json
+{
+  "trades": [
+    {
+      "id": "paper-001",
+      "symbol": "NASDAQ:AAPL",
+      "mode": "paper",
+      "side": "BUY",
+      "timestamp": 1789990000000,
+      "price": 225.4,
+      "quantity": 10,
+      "strategyId": "aapl-example"
+    }
+  ]
+}
+```
+
+`mode` must be `paper` or `live`; no live fill is fabricated when an execution adapter/ledger has not recorded one.
+
 ## Architecture
 
 ```text
