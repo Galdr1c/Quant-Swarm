@@ -43,6 +43,7 @@ export interface BacktestResult {
   strategyId: string;
   netReturn: number;
   annualReturn: number;
+  annualization: number;
   sharpe: number;
   sortino: number;
   maxDrawdown: number;
