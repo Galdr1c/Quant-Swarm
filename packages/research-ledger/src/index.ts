@@ -523,11 +523,30 @@ export class PostgresResearchLedger implements ResearchLedger {
   }
 }
 
+export interface PurgedCvFoldEvidence {
+  fold: number;
+  trainObservations: number;
+  testObservations: number;
+  testStartTimestamp: number;
+  testEndTimestamp: number;
+  sharpe: number;
+  netReturn: number;
+  maxDrawdown: number;
+  totalTrades: number;
+  annualization: number;
+}
+
 export interface PurgedCvEvidence {
   nObservations: number;
   nSplits?: number;
   purgeBars?: number;
   embargoBars?: number;
+  evaluatedFolds?: number;
+  positiveSharpeFraction?: number;
+  medianSharpe?: number;
+  meanNetReturn?: number;
+  worstMaxDrawdown?: number;
+  folds?: PurgedCvFoldEvidence[];
 }
 
 export interface ResearchEvidenceBuildOptions {
