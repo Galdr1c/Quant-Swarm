@@ -34,8 +34,12 @@ describe("research dashboard assets", () => {
     expect(appJs).toContain("/api/market/history");
     expect(appJs).toContain("/api/trades");
     expect(appJs).toContain("/api/portfolio");
+    expect(appJs).toContain("/api/paper/order");
     expect(appJs).toContain("trade-marker");
     expect(html).toContain('id="paper-portfolio-strip"');
+    expect(html).toContain('id="paper-order-quantity"');
+    expect(html).toContain('id="paper-buy-button"');
+    expect(html).toContain('id="paper-sell-button"');
     expect(serverJs).toContain("/api/paper/order");
     expect(serverJs).toContain("new RiskEngine(DEFAULT_RISK_LIMITS, \"paper\")");
     expect(serverJs).not.toContain("/api/live/order");
