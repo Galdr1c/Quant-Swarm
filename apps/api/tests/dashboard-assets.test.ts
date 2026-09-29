@@ -5,11 +5,12 @@ const dashboardUrl = new URL("../../dashboard/", import.meta.url);
 
 describe("research dashboard assets", () => {
   it("ships the cartoon 3D observatory shell and GPU fallback path", async () => {
-    const [html, css, appJs, worldJs] = await Promise.all([
+    const [html, css, appJs, worldJs, serverJs] = await Promise.all([
       readFile(new URL("index.html", dashboardUrl), "utf8"),
       readFile(new URL("styles.css", dashboardUrl), "utf8"),
       readFile(new URL("app.js", dashboardUrl), "utf8"),
       readFile(new URL("world.js", dashboardUrl), "utf8"),
+      readFile(new URL("server.mjs", dashboardUrl), "utf8"),
     ]);
 
     expect(html).toContain("Swarm Observatory");
@@ -35,6 +36,9 @@ describe("research dashboard assets", () => {
     expect(appJs).toContain("/api/portfolio");
     expect(appJs).toContain("trade-marker");
     expect(html).toContain('id="paper-portfolio-strip"');
+    expect(serverJs).toContain("/api/paper/order");
+    expect(serverJs).toContain("new RiskEngine(DEFAULT_RISK_LIMITS, \"paper\")");
+    expect(serverJs).not.toContain("/api/live/order");
 
     expect(worldJs).toContain('getContext("webgl2"');
     expect(worldJs).toContain("#version 300 es");
