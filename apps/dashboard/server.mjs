@@ -184,7 +184,7 @@ async function researchOnce(req, res) {
     return sendJson(res, 400, { error: "Choose a valid exchange-qualified TradingView market." });
   }
   if (!supportedTimeframes.has(timeframe)) {
-    return sendJson(res, 400, { error: "Choose one of the supported timeframes: 15m, 1h, 4h, 1d." });
+    return sendJson(res, 400, { error: "Choose one of the supported timeframes: 5m, 15m, 1h, 4h, 1d." });
   }
 
   const dataDirectory = join(repoRoot, ".data");
