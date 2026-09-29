@@ -85,4 +85,43 @@ describe("Strategy Schema Validation", () => {
     const result = validateStrategy(bad);
     expect(result.valid).toBe(false);
   });
+
+  it("rejects duplicate indicator ids", () => {
+    const bad = {
+      ...validStrategy,
+      indicators: [
+        { id: "dup", type: "EMA", params: { length: 9 } },
+        { id: "dup", type: "RSI", params: { length: 14 } },
+      ],
+      entry: { operator: "AND", rules: [{ left: "dup", operator: ">", right: 50 }] },
+      exit: { operator: "OR", rules: [{ left: "dup", operator: "<", right: 50 }] },
+    };
+    const result = validateStrategy(bad);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes("duplicated"))).toBe(true);
+  });
+
+  it("rejects invalid indicator lengths and MACD ordering", () => {
+    const badLength = {
+      ...validStrategy,
+      indicators: [{ id: "rsi", type: "RSI", params: { length: 0 } }],
+      entry: { operator: "AND", rules: [{ left: "rsi", operator: "<", right: 30 }] },
+      exit: { operator: "OR", rules: [{ left: "rsi", operator: ">", right: 60 }] },
+    };
+    expect(validateStrategy(badLength).valid).toBe(false);
+
+    const badMacd = {
+      ...validStrategy,
+      indicators: [{
+        id: "macd",
+        type: "MACD",
+        params: { fastLength: 30, slowLength: 20, signalLength: 9 },
+      }],
+      entry: { operator: "AND", rules: [{ left: "macd", operator: ">", right: 0 }] },
+      exit: { operator: "OR", rules: [{ left: "macd", operator: "<", right: 0 }] },
+    };
+    const result = validateStrategy(badMacd);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes("fastLength"))).toBe(true);
+  });
 });
