@@ -19,6 +19,13 @@ export interface UniverseResearchResult {
   timeframe: string;
   status: UniverseResultStatus;
   runId?: string;
+  datasetIdentity?: {
+    datasetFingerprint: string;
+    holdoutFingerprint: string;
+    discovery: { observations: number; firstTimestamp: number; lastTimestamp: number };
+    validation: { observations: number; firstTimestamp: number; lastTimestamp: number };
+    finalHoldout: { observations: number; firstTimestamp: number; lastTimestamp: number };
+  };
   candidate?: { type: string; score: number; timestamp: number };
   selectedStrategy?: { id: string; name: string };
   validation?: UniverseBacktestSnapshot;
