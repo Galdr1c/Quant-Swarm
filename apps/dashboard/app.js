@@ -44,6 +44,9 @@ document.addEventListener("DOMContentLoaded", () => {
     loadMarketChart();
   });
   $("chart-research-button")?.addEventListener("click", runChartResearch);
+  $("paper-buy-button")?.addEventListener("click", () => placePaperOrder("BUY"));
+  $("paper-sell-button")?.addEventListener("click", () => placePaperOrder("SELL"));
+  $("paper-order-quantity")?.addEventListener("input", syncChartControls);
 
   $("filters")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-filter]");
@@ -341,6 +344,26 @@ function syncChartControls() {
     button.setAttribute("aria-pressed", String(active));
   });
 
+  const latestPrice = Number(state.priceCandles.at(-1)?.close);
+  const hasTradablePrice = Number.isFinite(latestPrice) && latestPrice > 0;
+  const quantity = Number($("paper-order-quantity")?.value);
+  const validQuantity = Number.isFinite(quantity) && quantity > 0;
+  const paperBusy =
+    $("paper-buy-button")?.getAttribute("aria-busy") === "true" ||
+    $("paper-sell-button")?.getAttribute("aria-busy") === "true";
+
+  const orderMarket = $("paper-order-market");
+  if (orderMarket) {
+    orderMarket.textContent =
+      symbol && hasTradablePrice
+        ? shortSymbol(symbol) + " @ " + formatNumber(latestPrice, 4)
+        : "Select a market";
+  }
+  ["paper-buy-button", "paper-sell-button"].forEach((id) => {
+    const button = $(id);
+    if (button) button.disabled = !symbol || !hasTradablePrice || !validQuantity || paperBusy;
+  });
+
   const analyze = $("chart-research-button");
   if (analyze) {
     analyze.disabled = !symbol || analyze.getAttribute("aria-busy") === "true";
@@ -412,6 +435,60 @@ async function loadMarketChart() {
     drawPriceChart([], []);
     $("market-chart-status").textContent =
       error instanceof Error ? error.message : "Market chart failed.";
+  }
+}
+
+async function placePaperOrder(side) {
+  const symbol = state.chartSymbol;
+  const price = Number(state.priceCandles.at(-1)?.close);
+  const quantity = Number($("paper-order-quantity")?.value);
+  if (!symbol || !Number.isFinite(price) || price <= 0) {
+    return toast("Load a market price before placing a paper order");
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return toast("Paper quantity must be positive");
+  }
+
+  const activeButton = side === "BUY" ? $("paper-buy-button") : $("paper-sell-button");
+  ["paper-buy-button", "paper-sell-button"].forEach((id) => {
+    $(id)?.setAttribute("aria-busy", "true");
+  });
+  if (activeButton) activeButton.textContent = side === "BUY" ? "Buying…" : "Selling…";
+  syncChartControls();
+
+  try {
+    const response = await fetch("/api/paper/order", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        symbol,
+        side,
+        quantity,
+        price,
+        strategyId: "dashboard-paper",
+        reduceOnly: side === "SELL",
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const reason = result?.risk?.reason ? " · " + result.risk.reason : "";
+      throw new Error((result.error || "Paper order failed.") + reason);
+    }
+
+    toast(
+      "PAPER " + side + " " + formatNumber(quantity, 6) + " " +
+      shortSymbol(symbol) + " @ " + formatNumber(result.fill?.price ?? price, 4)
+    );
+    await loadMarketChart();
+  } catch (error) {
+    toast(error instanceof Error ? error.message : "Paper order failed.");
+  } finally {
+    ["paper-buy-button", "paper-sell-button"].forEach((id) => {
+      const button = $(id);
+      button?.removeAttribute("aria-busy");
+      if (button) button.textContent = id === "paper-buy-button" ? "Paper Buy" : "Paper Sell";
+    });
+    syncChartControls();
   }
 }
 
