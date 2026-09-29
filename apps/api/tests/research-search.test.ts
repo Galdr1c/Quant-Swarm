@@ -71,7 +71,11 @@ class FakeQuantClient implements ResearchQuantClient {
   evidenceSeen?: unknown;
   calibrationCandlesSeen?: OHLCV[];
 
-  async backtest(input: StrategyDefinition, rows: OHLCV[]): Promise<BacktestWithEquity> {
+  async backtest(
+    input: StrategyDefinition,
+    rows: OHLCV[],
+    annualization?: number
+  ): Promise<BacktestWithEquity> {
     const isFinal = rows[0].timestamp >= 2_000_000;
     if (isFinal) this.finalStrategyId = input.id;
     const sharpe = isFinal ? 0.7 : this.validationSharpes[input.id];
@@ -85,7 +89,7 @@ class FakeQuantClient implements ResearchQuantClient {
       strategyId: input.id,
       netReturn: sharpe * 2,
       annualReturn: sharpe * 3,
-      annualization: 365.25 * 24 * 60,
+      annualization: annualization ?? 365.25 * 24 * 60,
       sharpe,
       sortino: sharpe + 0.2,
       maxDrawdown: 5,
@@ -187,7 +191,6 @@ function searchParams(ledger: MemoryResearchLedger, quant: ResearchQuantClient, 
       quant,
       options: {
         runId,
-        annualization: 365.25 * 24 * 4,
         coordinator: { maxConcurrency: 2, timeoutMs: 1000 },
       },
     },
