@@ -21,6 +21,12 @@ Each JSONL row contains a normalized fill such as:
 
 The dashboard never fabricates a live/real marker. A `mode:"live"` point appears only when a broker integration has recorded a validated broker fill in the ledger.
 
+### Stateful paper portfolio
+
+The native paper account reconstructs its state from the append-only fill ledger. `PaperPortfolio` tracks cash, average entry cost, open long quantities, realized/unrealized PnL, fees, peak equity, drawdown and gross/symbol exposure. `PaperExecutor.executeAgainstPortfolio(...)` derives the exact `PortfolioState` consumed by the sovereign risk engine before settling and persisting a fill.
+
+The dashboard rebuilds this account using `PAPER_INITIAL_CASH` (default `100000`) and marks the currently selected symbol at its latest closed TradingView price. Other open symbols fall back to their average entry price until they are selected/marked by an integration.
+
 ### Holdout integrity
 
 Every research run now fingerprints the complete split and the final holdout. Trial records carry dataset/holdout tags, and completed run records persist the dataset fingerprint, holdout fingerprint, split timestamp ranges, final-holdout metrics, annualization, and deterministic validation verdict/checks.
