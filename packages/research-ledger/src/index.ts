@@ -23,6 +23,8 @@ export interface ResearchTrialMetrics {
   outOfSampleReturns?: number[];
   /** Strategy returns grouped by deterministic market regime. */
   regimeReturns?: Record<string, number[]>;
+  /** Deterministic purged/embargoed fold evaluation for this strategy trial. */
+  purgedCv?: PurgedCvEvidence;
 }
 
 export interface ResearchTrialProvenance {
@@ -687,6 +689,16 @@ export function validateRecord(value: unknown): asserts value is ResearchTrialRe
   }
   if (record.metrics.outOfSampleReturns !== undefined) {
     validateReturnPath(record.metrics.outOfSampleReturns, "metrics.outOfSampleReturns");
+  }
+  if (record.metrics.purgedCv?.folds !== undefined) {
+    if (!Array.isArray(record.metrics.purgedCv.folds) || record.metrics.purgedCv.folds.length === 0) {
+      throw new Error("metrics.purgedCv.folds must be a non-empty array");
+    }
+    for (const fold of record.metrics.purgedCv.folds) {
+      if (!Number.isFinite(fold.sharpe) || !Number.isFinite(fold.netReturn)) {
+        throw new Error("metrics.purgedCv fold metrics must be finite");
+      }
+    }
   }
   if (record.metrics.regimeReturns !== undefined) {
     if (!record.metrics.regimeReturns || typeof record.metrics.regimeReturns !== "object") {
