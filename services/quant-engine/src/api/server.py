@@ -151,6 +151,7 @@ def backtest(req: BacktestRequest) -> dict[str, Any]:
             "strategyId": payload["strategy_id"],
             "netReturn": payload["net_return"],
             "annualReturn": payload["annual_return"],
+            "annualization": payload["annualization"],
             "sharpe": payload["sharpe"],
             "sortino": payload["sortino"],
             "maxDrawdown": payload["max_drawdown"],
