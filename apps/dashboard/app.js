@@ -481,7 +481,11 @@ function drawPriceChart(candles, trades) {
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
     title.textContent =
       trade.mode.toUpperCase() + " " + trade.side + " · " +
-      formatNumber(trade.price, 4) + " · " + formatDate(trade.timestamp);
+      formatNumber(trade.price, 4) +
+      (Number.isFinite(Number(trade.quantity)) ? " · qty " + formatNumber(trade.quantity, 4) : "") +
+      (Number.isFinite(Number(trade.fee)) ? " · fee " + formatNumber(trade.fee, 4) : "") +
+      (trade.source ? " · " + trade.source : "") +
+      " · " + formatDate(trade.timestamp);
     group.append(marker, title);
     layer.append(group);
   });
