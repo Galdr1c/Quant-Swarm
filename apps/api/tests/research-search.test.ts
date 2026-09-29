@@ -227,6 +227,9 @@ describe("runResearchSearch", () => {
     const run = await ledger.getRun("run-test");
     expect(run?.status).toBe("COMPLETED");
     expect(run?.selectedTrialId).toBe(result.selectedTrialId);
+    expect(run?.evidence?.datasetFingerprint).toBe(result.datasetIdentity.datasetFingerprint);
+    expect(run?.evidence?.holdoutFingerprint).toBe(result.datasetIdentity.holdoutFingerprint);
+    expect(run?.evidence?.researchValidation.overallVerdict).toBe("PASS");
 
     expect(result.evidence.trialSharpes).toHaveLength(3);
     expect(result.evidence.annualization).toBe(365.25 * 24 * 60);
