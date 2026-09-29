@@ -207,7 +207,6 @@ export async function runResearchSearch(params: {
   }
 
   try {
-    const annualization = positiveFinite(options.annualization, 365.25 * 24 * 4);
     const minimumSuccessfulTrials = Math.max(2, Math.floor(options.minimumSuccessfulTrials ?? 2));
     const regimeCalibration = await quant.calibrateRegimes(
       regimeCalibrationCandles,
@@ -223,7 +222,12 @@ export async function runResearchSearch(params: {
       coordination.hypotheses.map(async (row, index): Promise<EvaluationOutcome> => {
         const strategy = row.hypothesis.strategy;
         try {
+          assertStrategyTarget(strategy, context.targetMarket);
           const backtest = await quant.backtest(strategy, validationCandles);
+          const annualization = positiveFinite(
+            backtest.annualization,
+            inferAnnualization(validationCandles)
+          );
           const [psr, regime] = await Promise.all([
             quant.psr(backtest.equityCurve, annualization),
             quant.regimeReturns(backtest.equityCurve, validationCandles, regimeCalibration),
@@ -316,7 +320,10 @@ export async function runResearchSearch(params: {
       (record) => !leasedLedger || record.trialId.startsWith(trialPrefix)
     );
     const evidence = buildResearchEvidence(records, selected.trialId, {
-      annualization,
+      annualization: positiveFinite(
+        validationBacktest.annualization,
+        inferAnnualization(validationCandles)
+      ),
       purgedCv: {
         nObservations: validationCandles.length,
         nSplits: options.purgedCv?.nSplits ?? 5,
@@ -436,6 +443,32 @@ export function equityReturns(equityCurve: readonly number[]): number[] {
     if (Number.isFinite(value)) returns.push(value);
   }
   return returns;
+}
+
+export function inferAnnualization(candles: readonly OHLCV[]): number {
+  if (candles.length < 2) return 365.25 * 24 * 4;
+  const first = candles[0].timestamp;
+  const last = candles[candles.length - 1].timestamp;
+  const deltaMs = last - first;
+  if (!Number.isFinite(deltaMs) || deltaMs <= 0) return 365.25 * 24 * 4;
+  const years = deltaMs / (365.25 * 24 * 60 * 60 * 1000);
+  if (!Number.isFinite(years) || years <= 0) return 365.25 * 24 * 4;
+  return (candles.length - 1) / years;
+}
+
+function assertStrategyTarget(
+  strategy: StrategyDefinition,
+  target: ResearchContext["targetMarket"]
+): void {
+  if (!target) return;
+  if (
+    strategy.market.symbol !== target.symbol ||
+    strategy.market.timeframe !== target.timeframe
+  ) {
+    throw new Error(
+      `Strategy target mismatch: expected ${target.symbol} ${target.timeframe}, received ${strategy.market.symbol} ${strategy.market.timeframe}`
+    );
+  }
 }
 
 function startLeaseHeartbeat(
