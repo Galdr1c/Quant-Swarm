@@ -32,7 +32,9 @@ describe("research dashboard assets", () => {
     expect(appJs).toContain("positiveHoldoutRate");
     expect(appJs).toContain("/api/market/history");
     expect(appJs).toContain("/api/trades");
+    expect(appJs).toContain("/api/portfolio");
     expect(appJs).toContain("trade-marker");
+    expect(html).toContain('id="paper-portfolio-strip"');
 
     expect(worldJs).toContain('getContext("webgl2"');
     expect(worldJs).toContain("#version 300 es");
