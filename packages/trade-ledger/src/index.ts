@@ -319,10 +319,11 @@ export class PaperExecutor {
       throw new Error("PaperExecutor requires RiskEngine mode=paper");
     }
 
-    const risk = riskEngine.evaluateOrder(order, state);
+    const executionPrice = this.executionPrice(order);
+    const risk = riskEngine.evaluateOrder({ ...order, price: executionPrice }, state);
     if (!risk.approved) return { risk };
 
-    const fill = this.buildFill(order);
+    const fill = this.buildFill(order, executionPrice);
     await this.ledger.append(fill);
     return { risk, fill };
   }
@@ -339,10 +340,11 @@ export class PaperExecutor {
     }
 
     const state = portfolio.toRiskState(marks, dayStartEquity);
-    const risk = riskEngine.evaluateOrder(order, state);
+    const executionPrice = this.executionPrice(order);
+    const risk = riskEngine.evaluateOrder({ ...order, price: executionPrice }, state);
     if (!risk.approved) return { risk, portfolio: portfolio.snapshot(marks) };
 
-    const fill = this.buildFill(order);
+    const fill = this.buildFill(order, executionPrice);
 
     // Validate cash/position constraints before persistence so the append-only
     // ledger never contains a fill the paper account could not actually settle.
@@ -352,11 +354,14 @@ export class PaperExecutor {
     return { risk, fill, portfolio: portfolio.snapshot(marks) };
   }
 
-  private buildFill(order: ProposedOrder): TradeFill {
+  private executionPrice(order: ProposedOrder): number {
     const slip = this.slippageBps / 10_000;
-    const price = order.side === "BUY"
+    return order.side === "BUY"
       ? order.price * (1 + slip)
       : order.price * (1 - slip);
+  }
+
+  private buildFill(order: ProposedOrder, price = this.executionPrice(order)): TradeFill {
     const notional = price * order.quantity;
     const fee = notional * (this.feeBps / 10_000);
     return {
