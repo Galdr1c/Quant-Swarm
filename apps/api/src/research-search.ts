@@ -424,6 +424,7 @@ export async function runResearchSearch(params: {
         overallVerdict: researchValidation.overallVerdict,
         checks: researchValidation.checks,
       },
+      purgedCv: purgedCvEvidence,
     };
 
     if (leasedLedger && heartbeat) {
