@@ -16,6 +16,9 @@ describe("research dashboard assets", () => {
     expect(html).toContain('meta name="viewport"');
     expect(html).toContain('id="shader-world"');
     expect(html).toContain("./world.js");
+    expect(html).toContain('data-chart-timeframe="5m"');
+    expect(html).toContain('id="price-chart"');
+    expect(html).toContain('id="chart-research-button"');
 
     expect(css).toContain("transform-style:preserve-3d");
     expect(css).toContain("@container");
@@ -27,6 +30,9 @@ describe("research dashboard assets", () => {
     expect(appJs).toContain("startViewTransition");
     expect(appJs).toContain("fleet-row");
     expect(appJs).toContain("positiveHoldoutRate");
+    expect(appJs).toContain("/api/market/history");
+    expect(appJs).toContain("/api/trades");
+    expect(appJs).toContain("trade-marker");
 
     expect(worldJs).toContain('getContext("webgl2"');
     expect(worldJs).toContain("#version 300 es");
