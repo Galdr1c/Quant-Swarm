@@ -8,7 +8,13 @@ import {
   type PortfolioState,
   type ProposedOrder,
 } from "@quant-swarm/risk-contracts";
-import { JsonlTradeLedger, PaperExecutor, brokerFill } from "../src/index.js";
+import {
+  JsonlTradeLedger,
+  PaperExecutor,
+  PaperPortfolio,
+  brokerFill,
+  rebuildPaperPortfolio,
+} from "../src/index.js";
 
 function state(): PortfolioState {
   return {
@@ -76,6 +82,86 @@ describe("trade ledger and paper executor", () => {
 
     expect(result.risk).toEqual({ approved: false, reason: "DAILY_LOSS_LIMIT" });
     expect(result.fill).toBeUndefined();
+    expect(await ledger.list()).toEqual([]);
+  });
+
+  it("maintains cash, positions, realized/unrealized PnL and risk state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const ledger = new JsonlTradeLedger(join(dir, "portfolio.jsonl"));
+    const ids = ["buy-001", "sell-001"];
+    const executor = new PaperExecutor(ledger, {
+      slippageBps: 0,
+      feeBps: 0,
+      now: () => 1_800_000_000_000,
+      idFactory: () => ids.shift()!,
+    });
+    const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
+    const portfolio = new PaperPortfolio(100_000);
+
+    const buy = await executor.executeAgainstPortfolio(
+      order(),
+      portfolio,
+      risk,
+      { "NASDAQ:AAPL": 200 },
+      100_000
+    );
+    expect(buy.risk.approved).toBe(true);
+    expect(buy.portfolio?.cash).toBeCloseTo(98_000);
+    expect(buy.portfolio?.positions[0]).toMatchObject({
+      symbol: "NASDAQ:AAPL",
+      quantity: 10,
+      averageEntryPrice: 200,
+    });
+
+    const marked = portfolio.snapshot({ "NASDAQ:AAPL": 210 });
+    expect(marked.equity).toBeCloseTo(100_100);
+    expect(marked.unrealizedPnl).toBeCloseTo(100);
+
+    const sell = await executor.executeAgainstPortfolio(
+      { ...order(), side: "SELL", quantity: 5, price: 210, reduceOnly: true },
+      portfolio,
+      risk,
+      { "NASDAQ:AAPL": 210 },
+      100_000
+    );
+    expect(sell.risk.approved).toBe(true);
+    expect(sell.portfolio?.cash).toBeCloseTo(99_050);
+    expect(sell.portfolio?.realizedPnl).toBeCloseTo(50);
+    expect(sell.portfolio?.positions[0].quantity).toBeCloseTo(5);
+    expect(sell.portfolio?.unrealizedPnl).toBeCloseTo(50);
+
+    const riskState = portfolio.toRiskState({ "NASDAQ:AAPL": 210 }, 100_000);
+    expect(riskState.equity).toBeCloseTo(100_100);
+    expect(riskState.dailyPnl).toBeCloseTo(100);
+    expect(riskState.totalExposurePct).toBeGreaterThan(0);
+
+    const rebuilt = await rebuildPaperPortfolio(ledger, 100_000);
+    const rebuiltSnapshot = rebuilt.snapshot({ "NASDAQ:AAPL": 210 });
+    expect(rebuiltSnapshot.cash).toBeCloseTo(sell.portfolio!.cash);
+    expect(rebuiltSnapshot.realizedPnl).toBeCloseTo(50);
+    expect(rebuiltSnapshot.positions[0].quantity).toBeCloseTo(5);
+  });
+
+  it("rejects unsettled paper sells before they enter the append-only ledger", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const ledger = new JsonlTradeLedger(join(dir, "portfolio.jsonl"));
+    const executor = new PaperExecutor(ledger, {
+      slippageBps: 0,
+      feeBps: 0,
+      idFactory: () => "bad-sell",
+    });
+    const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
+    const portfolio = new PaperPortfolio(100_000);
+
+    await expect(
+      executor.executeAgainstPortfolio(
+        { ...order(), side: "SELL", quantity: 1, reduceOnly: true },
+        portfolio,
+        risk,
+        { "NASDAQ:AAPL": 200 }
+      )
+    ).rejects.toThrow(/cannot sell more/);
+
     expect(await ledger.list()).toEqual([]);
   });
 
