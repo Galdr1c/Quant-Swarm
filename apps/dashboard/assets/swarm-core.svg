@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" fill="none">
+  <defs>
+    <radialGradient id="g" cx="0" cy="0" r="1" gradientTransform="translate(80 72) rotate(90) scale(70)">
+      <stop stop-color="#172A3C"/>
+      <stop offset=".62" stop-color="#0B1420"/>
+      <stop offset="1" stop-color="#070B12"/>
+    </radialGradient>
+    <linearGradient id="c" x1="35" y1="34" x2="125" y2="126">
+      <stop stop-color="#61E7FF"/>
+      <stop offset="1" stop-color="#8F7CFF"/>
+    </linearGradient>
+  </defs>
+  <circle cx="80" cy="80" r="62" fill="url(#g)" stroke="#23384D"/>
+  <circle cx="80" cy="80" r="45" stroke="url(#c)" stroke-opacity=".55"/>
+  <circle cx="80" cy="80" r="25" fill="#0D1A28" stroke="url(#c)" stroke-width="1.5"/>
+  <circle cx="80" cy="80" r="6" fill="#61E7FF"/>
+  <circle cx="80" cy="80" r="11" stroke="#61E7FF" stroke-opacity=".28"/>
+  <path d="M80 35v20M80 105v20M35 80h20M105 80h20M48 48l14 14M98 98l14 14M112 48L98 62M62 98l-14 14" stroke="#6F89A3" stroke-opacity=".42"/>
+  <circle cx="80" cy="35" r="4" fill="#61E7FF"/>
+  <circle cx="125" cy="80" r="4" fill="#8F7CFF"/>
+  <circle cx="80" cy="125" r="4" fill="#5CE0AD"/>
+  <circle cx="35" cy="80" r="4" fill="#F4C95D"/>
+  <path d="M80 55a25 25 0 0125 25" stroke="#61E7FF" stroke-width="2" stroke-linecap="round"/>
+  <path d="M80 105a25 25 0 01-25-25" stroke="#8F7CFF" stroke-width="2" stroke-linecap="round"/>
+</svg>
