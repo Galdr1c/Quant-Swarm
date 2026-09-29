@@ -27,7 +27,14 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("market-search-query")?.addEventListener("input", scheduleMarketSearch);
   $("market-search-type")?.addEventListener("change", scheduleMarketSearch);
-  $("market-timeframe")?.addEventListener("change", updateResearchAction);
+  $("market-timeframe")?.addEventListener("change", () => {
+    updateResearchAction();
+    if (!selectedMarket) return;
+    state.chartSymbol = selectedMarket.id;
+    state.chartTimeframe = $("market-timeframe").value;
+    syncChartControls();
+    loadMarketChart();
+  });
   $("market-research-button")?.addEventListener("click", runOneOffResearch);
   $("chart-timeframes")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-chart-timeframe]");
@@ -735,6 +742,11 @@ function selectMarket(market, button) {
   $("market-selection").hidden = false;
   $("market-search-status").textContent = "Piyasa seçildi. Zaman dilimini belirleyip araştırmayı başlat.";
   updateResearchAction();
+
+  state.chartSymbol = market.id;
+  state.chartTimeframe = $("market-timeframe").value;
+  syncChartControls();
+  loadMarketChart();
 }
 
 function updateResearchAction() {
