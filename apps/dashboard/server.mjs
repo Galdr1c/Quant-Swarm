@@ -9,13 +9,15 @@ import {
   TradingViewMarketDataProvider,
   searchTradingViewMarkets
 } from "../../packages/market-data/dist/tradingview.js";
+import { JsonlTradeLedger } from "../../packages/trade-ledger/dist/index.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(root, "../..");
 const port = Number(process.env.QUANT_DASHBOARD_PORT ?? 4173);
 const reportPath = resolve(process.env.QUANT_REPORT_PATH ?? ".data/universe-report.json");
 const demoPath = join(root, "demo-report.json");
-const tradesPath = resolve(process.env.QUANT_TRADES_PATH ?? ".data/trades.json");
+const tradesPath = resolve(process.env.QUANT_TRADES_PATH ?? ".data/trades.jsonl");
+const tradeLedger = new JsonlTradeLedger(tradesPath);
 const researchRunnerPath = join(repoRoot, "apps", "api", "dist", "universe.js");
 const supportedMarketTypes = new Set([
   "",
@@ -145,27 +147,18 @@ async function recordedTrades(url, res) {
   }
 
   try {
-    const payload = await readJsonWithFallback(tradesPath, null);
-    const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.trades) ? payload.trades : [];
-    const trades = rows
-      .filter((trade) => normalizeSearchResultId(trade?.symbol) === symbol)
-      .filter((trade) => trade?.mode === "paper" || trade?.mode === "live")
-      .filter((trade) => trade?.side === "BUY" || trade?.side === "SELL")
-      .filter((trade) =>
-        Number.isFinite(Number(trade?.timestamp)) &&
-        Number.isFinite(Number(trade?.price))
-      )
-      .map((trade) => ({
-        id: String(trade.id ?? [trade.symbol, trade.timestamp, trade.side].join(":")),
-        symbol,
-        mode: trade.mode,
-        side: trade.side,
-        timestamp: Number(trade.timestamp),
-        price: Number(trade.price),
-        quantity: Number.isFinite(Number(trade.quantity)) ? Number(trade.quantity) : null,
-        strategyId: typeof trade.strategyId === "string" ? trade.strategyId : null
-      }))
-      .sort((a, b) => a.timestamp - b.timestamp);
+    const trades = (await tradeLedger.list(symbol)).map((trade) => ({
+      id: trade.id,
+      symbol: trade.symbol,
+      mode: trade.mode,
+      side: trade.side,
+      timestamp: trade.timestamp,
+      price: trade.price,
+      quantity: trade.quantity,
+      strategyId: trade.strategyId,
+      source: trade.source,
+      fee: trade.fee
+    }));
     return sendJson(res, 200, { symbol, trades });
   } catch (error) {
     return sendJson(res, 500, {
