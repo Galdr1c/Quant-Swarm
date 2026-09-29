@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#120d2c">
-  <title>Quant Swarm — Cartoon Research Observatory</title>
-  <link rel="stylesheet" href="./styles.css">
+  <meta name="theme-color" content="#080c14">
+  <title>Quant Swarm — Research Command Center</title>
+  <link rel="stylesheet" href="./styles.css">\n  <link rel="stylesheet" href="./theme-v2.css">
 </head>
 <body>
   <canvas id="shader-world" class="shader-world" aria-hidden="true"></canvas>
@@ -23,14 +23,14 @@
           <span class="brand-ring"></span>
           <span class="brand-core">QS</span>
         </div>
-        <div class="brand-copy"><strong>Quant Swarm</strong><small>Research Observatory</small></div>
+        <div class="brand-copy"><strong>Quant Swarm</strong><small>Quant Research System</small></div>
       </a>
 
       <nav class="side-nav" aria-label="Primary">
-        <button class="nav-item active" type="button" data-jump="#top"><span class="nav-glyph">⌁</span><b>Overview</b></button>
-        <button class="nav-item" type="button" data-jump="#opportunities"><span class="nav-glyph">◇</span><b>Opportunities</b></button>
-        <button class="nav-item" type="button" data-jump="#evidence"><span class="nav-glyph">✦</span><b>Evidence Lab</b></button>
-        <button class="nav-item" type="button" data-jump="#pipeline"><span class="nav-glyph">⌘</span><b>Pipeline</b></button>
+        <button class="nav-item active" type="button" data-jump="#top"><span class="nav-glyph"><svg class="ui-icon"><use href="./assets/icons.svg#icon-overview"></use></svg></span><b>Overview</b></button>
+        <button class="nav-item" type="button" data-jump="#opportunities"><span class="nav-glyph"><svg class="ui-icon"><use href="./assets/icons.svg#icon-radar"></use></svg></span><b>Opportunities</b></button>
+        <button class="nav-item" type="button" data-jump="#evidence"><span class="nav-glyph"><svg class="ui-icon"><use href="./assets/icons.svg#icon-shield"></use></svg></span><b>Evidence Lab</b></button>
+        <button class="nav-item" type="button" data-jump="#pipeline"><span class="nav-glyph"><svg class="ui-icon"><use href="./assets/icons.svg#icon-flow"></use></svg></span><b>Pipeline</b></button>
       </nav>
 
       <div class="mode-card sticker tilt-card">
@@ -49,21 +49,21 @@
       <header class="topbar">
         <div class="title-wrap">
           <div class="eyebrow"><span></span> MULTI-ASSET QUANT RESEARCH</div>
-          <h1>Welcome to the <em>Swarm Observatory.</em></h1>
-          <p>We launch tiny strategy explorers into TradingView data, then let deterministic statistics decide which ones make it home.</p>
+          <h1>Research the market. <em>Trust the evidence.</em></h1>
+          <p>AI proposes bounded strategy hypotheses. Deterministic backtests, final holdout evidence and an independent risk layer decide what survives.</p>
         </div>
         <div class="top-actions">
-          <button id="market-search-open" class="bubble-button bubble-primary" type="button"><span>⌕</span> Piyasa ara</button>
-          <button id="refresh-button" class="bubble-button bubble-secondary" type="button"><span>↻</span> Refresh</button>
-          <button id="run-button" class="bubble-button bubble-primary" type="button"><span>▶</span> Copy launch command</button>
+          <button id="market-search-open" class="bubble-button bubble-primary" type="button"><svg class="ui-icon" aria-hidden="true"><use href="./assets/icons.svg#icon-search"></use></svg> Piyasa ara</button>
+          <button id="refresh-button" class="bubble-button bubble-secondary" type="button"><svg class="ui-icon" aria-hidden="true"><use href="./assets/icons.svg#icon-refresh"></use></svg> Refresh</button>
+          <button id="run-button" class="bubble-button bubble-primary" type="button"><svg class="ui-icon" aria-hidden="true"><use href="./assets/icons.svg#icon-play"></use></svg> Copy launch command</button>
         </div>
       </header>
 
       <section class="orbit-status cartoon-surface" aria-label="System status">
         <div class="status-badge"><span class="dot live"></span><small>Source</small><strong>TradingView</strong></div>
-        <div class="status-badge"><span class="mini-icon">◷</span><small>Last scan</small><strong id="generated-at">—</strong></div>
-        <div class="status-badge"><span class="mini-icon">◉</span><small>Gate</small><strong>Final holdout</strong></div>
-        <div class="status-badge"><span class="mini-icon">☁</span><small>Execution</small><strong>Sleeping</strong></div>
+        <div class="status-badge"><span class="mini-icon"><svg class="ui-icon"><use href="./assets/icons.svg#icon-clock"></use></svg></span><small>Last scan</small><strong id="generated-at">—</strong></div>
+        <div class="status-badge"><span class="mini-icon"><svg class="ui-icon"><use href="./assets/icons.svg#icon-gate"></use></svg></span><small>Gate</small><strong>Final holdout</strong></div>
+        <div class="status-badge"><span class="mini-icon"><svg class="ui-icon"><use href="./assets/icons.svg#icon-moon"></use></svg></span><small>Execution</small><strong>Sleeping</strong></div>
         <em id="demo-badge" class="demo-badge" hidden>DEMO GALAXY</em>
       </section>
 
@@ -75,7 +75,7 @@
               <h2 id="hero-symbol">Waiting for report</h2>
               <em id="hero-verdict" class="verdict neutral">—</em>
             </div>
-            <p class="hero-subtitle">Best surviving strategy after validation/OOS and untouched final holdout.</p>
+            <p class="hero-subtitle">Selected by deterministic validation/OOS evidence and an untouched final holdout.</p>
 
             <div class="hero-metrics">
               <div class="metric-bubble lilac"><span>Holdout</span><strong id="hero-return">—</strong></div>
@@ -86,39 +86,42 @@
           </div>
 
           <div class="planetarium" aria-hidden="true">
-            <div class="orbit orbit-1"><span class="orbit-chip chip-a">α</span></div>
-            <div class="orbit orbit-2"><span class="orbit-chip chip-b">β</span></div>
-            <div class="planet">
-              <span class="planet-shine"></span>
-              <span class="planet-band"></span>
-              <span class="planet-face"><i></i><i></i><b></b></span>
-              <span class="planet-label" id="planet-label">QS</span>
+            <div class="swarm-core">
+              <div class="core-grid"></div>
+              <div class="core-orbit core-orbit-a"></div>
+              <div class="core-orbit core-orbit-b"></div>
+              <div class="core-orbit core-orbit-c"></div>
+              <span class="core-node node-data">DATA</span>
+              <span class="core-node node-ai">AI</span>
+              <span class="core-node node-oos">OOS</span>
+              <span class="core-node node-risk">RISK</span>
+              <div class="core-asset">
+                <img src="./assets/swarm-core.svg" alt="">
+                <span class="core-label" id="core-label">QS</span>
+              </div>
+              <div class="core-scan"></div>
             </div>
-            <div class="satellite sat-a">+</div>
-            <div class="satellite sat-b">◆</div>
-            <div class="satellite sat-c">✦</div>
-            <div class="planet-shadow"></div>
           </div>
         </article>
 
         <aside class="score-stack">
           <article class="score-card score-purple cartoon-surface tilt-card">
-            <span class="score-icon">◫</span>
+            <span class="score-icon"><svg class="ui-icon"><use href="./assets/icons.svg#icon-layers"></use></svg></span>
             <div><small>Assets researched</small><strong id="kpi-assets">—</strong><p id="kpi-assets-note">Across configured universe</p></div>
             <i class="score-star">✦</i>
           </article>
           <article class="score-card score-green cartoon-surface tilt-card">
-            <span class="score-icon">↗</span>
+            <span class="score-icon"><svg class="ui-icon"><use href="./assets/icons.svg#icon-chart"></use></svg></span>
             <div><small>Positive holdout</small><strong id="kpi-positive">—</strong><p>Historical final-holdout share</p></div>
             <i class="score-star">✦</i>
           </article>
           <article class="score-card score-yellow cartoon-surface tilt-card">
-            <span class="score-icon">✓</span>
+            <span class="score-icon"><svg class="ui-icon"><use href="./assets/icons.svg#icon-check"></use></svg></span>
             <div><small>PASS strategies</small><strong id="kpi-pass">—</strong><p id="kpi-pass-note">Research-grade validation</p></div>
             <i class="score-star">✦</i>
           </article>
           <article class="score-card score-pink cartoon-surface tilt-card">
-            <span class="score-icon">≈</span>
+            <span class="score-icon"><svg class="ui-icon"><use href="./assets/icons.svg#icon-activity"></use></svg></span>
             <div><small>Avg. holdout return</small><strong id="kpi-return">—</strong><p>Evidence, never a promise</p></div>
             <i class="score-star">✦</i>
           </article>
@@ -177,12 +180,12 @@
 
       <section class="bottom-grid">
         <article class="detail-island cartoon-surface tilt-card">
-          <div class="panel-head"><div><span class="panel-kicker">SELECTED RESEARCH</span><h2 id="detail-title">Pick a tiny explorer</h2></div><div class="magnifier">⌕</div></div>
+          <div class="panel-head"><div><span class="panel-kicker">SELECTED RESEARCH</span><h2 id="detail-title">Select a research candidate</h2></div><div class="magnifier"><svg class="ui-icon"><use href="./assets/icons.svg#icon-search"></use></svg></div></div>
           <div id="detail-content" class="detail-content"><p>Choose an opportunity to inspect its candidate signal, strategy and final-holdout evidence.</p></div>
         </article>
 
         <article class="pipeline-island cartoon-surface tilt-card" id="pipeline">
-          <div class="panel-head"><div><span class="panel-kicker">RESEARCH JOURNEY</span><h2>Swarm launch path</h2></div><div class="rocket">➜</div></div>
+          <div class="panel-head"><div><span class="panel-kicker">RESEARCH JOURNEY</span><h2>Swarm launch path</h2></div><div class="rocket"><svg class="ui-icon"><use href="./assets/icons.svg#icon-flow"></use></svg></div></div>
           <ol class="pipeline-list">
             <li class="done"><b>1</b><div><strong>TradingView telescope</strong><small>Closed historical candles</small></div></li>
             <li class="done"><b>2</b><div><strong>Discovery garden</strong><small>Candidate events sprout</small></div></li>
@@ -195,7 +198,7 @@
 
       <footer class="footer-note">
         <span>✦</span>
-        <p>Quant Swarm is a research instrument. Cartoon planets are playful; statistical gates are not.</p>
+        <p>Quant Swarm is a research instrument. Visuals explain the pipeline; statistical gates determine the evidence.</p>
         <span>✦</span>
       </footer>
     </main>
