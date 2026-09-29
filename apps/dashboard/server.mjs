@@ -9,7 +9,10 @@ import {
   TradingViewMarketDataProvider,
   searchTradingViewMarkets
 } from "../../packages/market-data/dist/tradingview.js";
-import { JsonlTradeLedger } from "../../packages/trade-ledger/dist/index.js";
+import {
+  JsonlTradeLedger,
+  rebuildPaperPortfolio
+} from "../../packages/trade-ledger/dist/index.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(root, "../..");
@@ -18,6 +21,7 @@ const reportPath = resolve(process.env.QUANT_REPORT_PATH ?? ".data/universe-repo
 const demoPath = join(root, "demo-report.json");
 const tradesPath = resolve(process.env.QUANT_TRADES_PATH ?? ".data/trades.jsonl");
 const tradeLedger = new JsonlTradeLedger(tradesPath);
+const paperInitialCash = positiveNumber(process.env.PAPER_INITIAL_CASH, 100_000);
 const researchRunnerPath = join(repoRoot, "apps", "api", "dist", "universe.js");
 const supportedMarketTypes = new Set([
   "",
@@ -60,6 +64,13 @@ const server = createServer(async (req, res) => {
         return sendJson(res, 405, { error: "Use GET to load market history." });
       }
       return marketHistory(url, res);
+    }
+
+    if (url.pathname === "/api/portfolio") {
+      if (req.method !== "GET") {
+        return sendJson(res, 405, { error: "Use GET to read the paper portfolio." });
+      }
+      return paperPortfolio(url, res);
     }
 
     if (url.pathname === "/api/trades") {
@@ -136,6 +147,30 @@ async function marketHistory(url, res) {
   } catch (error) {
     return sendJson(res, 502, {
       error: errorMessage(error, "TradingView history failed.")
+    });
+  }
+}
+
+async function paperPortfolio(url, res) {
+  const symbol = normalizeSearchResultId(url.searchParams.get("symbol"));
+  const rawPrice = Number(url.searchParams.get("price"));
+  const marks =
+    symbol && Number.isFinite(rawPrice) && rawPrice > 0
+      ? { [symbol]: rawPrice }
+      : {};
+
+  try {
+    const portfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
+    const snapshot = portfolio.snapshot(marks);
+    return sendJson(res, 200, {
+      ...snapshot,
+      positions: snapshot.positions,
+      markSymbol: symbol,
+      markPrice: symbol ? marks[symbol] ?? null : null
+    });
+  } catch (error) {
+    return sendJson(res, 500, {
+      error: errorMessage(error, "Could not rebuild paper portfolio.")
     });
   }
 }
@@ -276,6 +311,11 @@ async function readJsonRequest(req) {
   } catch {
     throw new Error("Request body must be valid JSON.");
   }
+}
+
+function positiveNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function errorMessage(error, fallback) {
