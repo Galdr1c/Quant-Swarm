@@ -59,7 +59,6 @@ export interface PaperPortfolioSnapshot {
 interface PaperPositionState {
   quantity: number;
   averageEntryPrice: number;
-  realizedPnl: number;
 }
 
 export class PaperPortfolio {
@@ -67,6 +66,7 @@ export class PaperPortfolio {
   private cashValue: number;
   private peakEquityValue: number;
   private totalFeesValue = 0;
+  private readonly realizedPnlBySymbol = new Map<string, number>();
 
   constructor(readonly initialCash: number) {
     if (!Number.isFinite(initialCash) || initialCash <= 0) {
@@ -80,25 +80,34 @@ export class PaperPortfolio {
     return this.cashValue;
   }
 
-  applyFill(fill: TradeFill): void {
+  assertCanApply(fill: TradeFill): void {
     validateTradeFill(fill);
     if (fill.mode !== "paper") {
       throw new Error("PaperPortfolio accepts paper fills only");
     }
+    const current = this.positions.get(fill.symbol);
+    if (fill.side === "BUY" && fill.notional + fill.fee > this.cashValue + 1e-9) {
+      throw new Error(
+        `Insufficient paper cash for ${fill.symbol}: required ${(fill.notional + fill.fee).toFixed(8)}, available ${this.cashValue.toFixed(8)}`
+      );
+    }
+    if (fill.side === "SELL" && fill.quantity > (current?.quantity ?? 0) + 1e-12) {
+      throw new Error(
+        `PaperPortfolio cannot sell more ${fill.symbol} than the long position`
+      );
+    }
+  }
+
+  applyFill(fill: TradeFill): void {
+    this.assertCanApply(fill);
 
     const current = this.positions.get(fill.symbol) ?? {
       quantity: 0,
       averageEntryPrice: 0,
-      realizedPnl: 0,
     };
 
     if (fill.side === "BUY") {
       const requiredCash = fill.notional + fill.fee;
-      if (requiredCash > this.cashValue + 1e-9) {
-        throw new Error(
-          `Insufficient paper cash for ${fill.symbol}: required ${requiredCash.toFixed(8)}, available ${this.cashValue.toFixed(8)}`
-        );
-      }
       const nextQuantity = current.quantity + fill.quantity;
       const weightedCost =
         current.averageEntryPrice * current.quantity + fill.price * fill.quantity;
@@ -107,16 +116,10 @@ export class PaperPortfolio {
       this.positions.set(fill.symbol, {
         quantity: nextQuantity,
         averageEntryPrice: weightedCost / nextQuantity,
-        realizedPnl: current.realizedPnl,
       });
       return;
     }
 
-    if (fill.quantity > current.quantity + 1e-12) {
-      throw new Error(
-        `PaperPortfolio cannot sell more ${fill.symbol} than the long position`
-      );
-    }
     const realized = (fill.price - current.averageEntryPrice) * fill.quantity;
     const nextQuantity = Math.max(0, current.quantity - fill.quantity);
     this.cashValue += fill.notional - fill.fee;
@@ -128,24 +131,20 @@ export class PaperPortfolio {
       this.positions.set(fill.symbol, {
         quantity: nextQuantity,
         averageEntryPrice: current.averageEntryPrice,
-        realizedPnl: current.realizedPnl + realized,
       });
     }
 
-    if (nextQuantity <= 1e-12 && current.quantity > 0) {
-      // Keep realized history on the closed symbol only in aggregate via snapshot
-      // reconstruction; open-position state intentionally contains no zero-qty rows.
-    }
-    this.closedRealizedPnl += realized;
+    this.realizedPnlBySymbol.set(
+      fill.symbol,
+      (this.realizedPnlBySymbol.get(fill.symbol) ?? 0) + realized
+    );
   }
-
-  private closedRealizedPnl = 0;
 
   snapshot(marks: Readonly<Record<string, number>> = {}): PaperPortfolioSnapshot {
     const positions: PaperPositionSnapshot[] = [];
     let grossExposure = 0;
     let unrealizedPnl = 0;
-    let openRealizedPnl = 0;
+
 
     for (const [symbol, position] of [...this.positions.entries()].sort(([a], [b]) =>
       a.localeCompare(b)
@@ -159,7 +158,6 @@ export class PaperPortfolio {
       const unrealized = (marketPrice - position.averageEntryPrice) * position.quantity;
       grossExposure += Math.abs(marketValue);
       unrealizedPnl += unrealized;
-      openRealizedPnl += position.realizedPnl;
       positions.push({
         symbol,
         quantity: position.quantity,
@@ -167,7 +165,7 @@ export class PaperPortfolio {
         marketPrice,
         marketValue,
         unrealizedPnl: unrealized,
-        realizedPnl: position.realizedPnl,
+        realizedPnl: this.realizedPnlBySymbol.get(symbol) ?? 0,
       });
     }
 
@@ -185,7 +183,10 @@ export class PaperPortfolio {
       cash: this.cashValue,
       equity,
       peakEquity: this.peakEquityValue,
-      realizedPnl: this.closedRealizedPnl + openRealizedPnl,
+      realizedPnl: [...this.realizedPnlBySymbol.values()].reduce(
+        (sum, value) => sum + value,
+        0
+      ),
       unrealizedPnl,
       totalFees: this.totalFeesValue,
       grossExposure,
@@ -345,7 +346,7 @@ export class PaperExecutor {
 
     // Validate cash/position constraints before persistence so the append-only
     // ledger never contains a fill the paper account could not actually settle.
-    await rebuildPortfolioWithPendingFill(portfolio, fill, marks);
+    portfolio.assertCanApply(fill);
     await this.ledger.append(fill);
     portfolio.applyFill(fill);
     return { risk, fill, portfolio: portfolio.snapshot(marks) };
@@ -373,43 +374,6 @@ export class PaperExecutor {
       source: "paper-executor",
     };
   }
-}
-
-async function rebuildPortfolioWithPendingFill(
-  portfolio: PaperPortfolio,
-  fill: TradeFill,
-  marks: Readonly<Record<string, number>>
-): Promise<PaperPortfolioSnapshot> {
-  const snapshot = portfolio.snapshot(marks);
-  const clone = new PaperPortfolio(snapshot.initialCash);
-  // Reconstruct open positions using synthetic paper fills at average cost.
-  // This clone is validation-only and is never persisted.
-  for (const position of snapshot.positions) {
-    clone.applyFill({
-      schemaVersion: 1,
-      id: `probe-open-${position.symbol}`,
-      symbol: position.symbol,
-      mode: "paper",
-      side: "BUY",
-      timestamp: 1,
-      price: position.averageEntryPrice,
-      quantity: position.quantity,
-      notional: position.averageEntryPrice * position.quantity,
-      fee: 0,
-      strategyId: "portfolio-probe",
-      source: "paper-executor",
-    });
-  }
-  // Adjusting clone cash to exact live state through public APIs would distort
-  // settlement validation, so validate the two constraints directly below.
-  if (fill.side === "BUY" && fill.notional + fill.fee > snapshot.cash + 1e-9) {
-    throw new Error("Insufficient paper cash for order settlement");
-  }
-  const open = snapshot.positions.find((position) => position.symbol === fill.symbol);
-  if (fill.side === "SELL" && fill.quantity > (open?.quantity ?? 0) + 1e-12) {
-    throw new Error(`PaperPortfolio cannot sell more ${fill.symbol} than the long position`);
-  }
-  return snapshot;
 }
 
 export function brokerFill(input: Omit<TradeFill, "schemaVersion" | "mode" | "source">): TradeFill {
