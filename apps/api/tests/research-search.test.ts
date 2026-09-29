@@ -222,6 +222,7 @@ describe("runResearchSearch", () => {
     expect(run?.selectedTrialId).toBe(result.selectedTrialId);
 
     expect(result.evidence.trialSharpes).toHaveLength(3);
+    expect(result.evidence.annualization).toBe(365.25 * 24 * 60);
     expect(result.evidence.candidatePValues).toHaveLength(3);
     expect(result.evidence.cscvReturns?.[0]).toHaveLength(3);
     expect(Object.keys(result.evidence.regimeReturns ?? {})).toEqual(["trending", "ranging", "volatile"]);
@@ -235,10 +236,11 @@ describe("runResearchSearch", () => {
     const ledger = new MemoryResearchLedger();
     const quant = new FakeQuantClient();
     const { params } = searchParams(ledger, quant, "run-target-mismatch");
-    params.context = {
+    const mismatchedContext: ResearchContext = {
       ...params.context,
       targetMarket: { symbol: "NASDAQ:NVDA", timeframe: "1h" },
     };
+    params.context = mismatchedContext;
 
     await expect(runResearchSearch(params)).rejects.toThrow(/0 successful trials/);
     const run = await ledger.getRun("run-target-mismatch");
