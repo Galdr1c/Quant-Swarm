@@ -27,6 +27,8 @@ The native paper account reconstructs its state from the append-only fill ledger
 
 The dashboard rebuilds this account using `PAPER_INITIAL_CASH` (default `100000`) and marks the currently selected symbol at its latest closed TradingView price. Other open symbols fall back to their average entry price until they are selected/marked by an integration.
 
+A paper-only execution endpoint is available at `POST /api/paper/order`. It accepts an exchange-qualified symbol, `BUY`/`SELL`, positive quantity/price and optional `strategyId`. The request is risk-checked at the adverse simulated execution price, settled against the reconstructed paper portfolio, then persisted with `PAPER_SLIPPAGE_BPS` and `PAPER_FEE_BPS`. There is intentionally no equivalent live-order endpoint.
+
 ### Holdout integrity
 
 Every research run now fingerprints the complete split and the final holdout. Trial records carry dataset/holdout tags, and completed run records persist the dataset fingerprint, holdout fingerprint, split timestamp ranges, final-holdout metrics, annualization, and deterministic validation verdict/checks.
