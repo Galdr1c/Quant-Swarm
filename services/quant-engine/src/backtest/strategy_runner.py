@@ -69,10 +69,14 @@ def evaluate_rule(
     operator = rule["operator"]
     right = rule["right"]
 
-    left_values = indicators.get(left_id, close)
+    if left_id not in indicators:
+        raise ValueError(f'Rule references undefined indicator: {left_id}')
+    left_values = indicators[left_id]
 
     if isinstance(right, str):
-        right_values = indicators.get(right, close)
+        if right not in indicators:
+            raise ValueError(f'Rule references undefined indicator: {right}')
+        right_values = indicators[right]
     else:
         right_values = np.full_like(close, float(right), dtype=np.float64)
 
