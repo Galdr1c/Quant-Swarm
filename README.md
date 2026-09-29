@@ -163,8 +163,10 @@ pnpm run dashboard
 
 Open `http://127.0.0.1:4173`. The dashboard is a responsive **research command center** that keeps the swarm identity without sacrificing dense-data readability. It combines the same deterministic evidence with a playful visual world:
 
-- WebGL2 procedural aurora + starfield shader background with pointer parallax
-- CSS 3D perspective/tilt cards, orbiting market planet and animated research objects
+- restrained WebGL2 ambient field with reduced-motion fallback
+- dark research-lab visual system with semantic PASS / REVIEW / FAIL colors
+- SVG Swarm Core showing DATA / AI / OOS / RISK as one visual pipeline
+- subtle perspective interactions instead of continuous decorative motion
 - container-query responsive composition plus mobile-specific layouts
 - same-document View Transition enhancement when supported
 - explicit reduced-motion support and CSS fallback when WebGL2 is unavailable
