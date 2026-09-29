@@ -113,6 +113,7 @@ export interface TrialEvaluation {
   agentName: string;
   record: ResearchTrialRecord;
   backtest: BacktestWithEquity;
+  purgedCv: PurgedCvEvidence;
 }
 
 export interface ResearchDatasetIdentity {
@@ -252,6 +253,11 @@ export async function runResearchSearch(params: {
     }
 
     const minimumSuccessfulTrials = Math.max(2, Math.floor(options.minimumSuccessfulTrials ?? 2));
+    const purgedCvOptions = {
+      nSplits: options.purgedCv?.nSplits ?? 5,
+      purgeBars: options.purgedCv?.purgeBars ?? 1,
+      embargoBars: options.purgedCv?.embargoBars ?? 1,
+    };
     const regimeCalibration = await quant.calibrateRegimes(
       regimeCalibrationCandles,
       options.regime
@@ -276,9 +282,15 @@ export async function runResearchSearch(params: {
             backtest.annualization,
             inferAnnualization(validationCandles)
           );
-          const [psr, regime] = await Promise.all([
+          const [psr, regime, purgedCv] = await Promise.all([
             quant.psr(backtest.equityCurve, annualization),
             quant.regimeReturns(backtest.equityCurve, validationCandles, regimeCalibration),
+            quant.purgedCv(
+              strategy,
+              validationCandles,
+              purgedCvOptions,
+              options.annualization
+            ),
           ]);
           const trialId = `${trialPrefix}${String(index + 1).padStart(3, "0")}:${slug(row.agentName)}`;
           const provenance = row.hypothesis.provenance;
@@ -306,6 +318,7 @@ export async function runResearchSearch(params: {
               pValue: psr.pValue,
               outOfSampleReturns: equityReturns(backtest.equityCurve),
               regimeReturns: regime.regimeReturns,
+              purgedCv,
             },
             tags: [
               `dataset:${datasetIdentity.datasetFingerprint}`,
@@ -316,7 +329,7 @@ export async function runResearchSearch(params: {
           return {
             ok: true,
             index,
-            evaluation: { trialId, agentName: row.agentName, record, backtest },
+            evaluation: { trialId, agentName: row.agentName, record, backtest, purgedCv },
           };
         } catch (error) {
           return {
@@ -366,18 +379,7 @@ export async function runResearchSearch(params: {
     }
 
     const validationBacktest = selected.backtest;
-    const purgedCvOptions = {
-      nSplits: options.purgedCv?.nSplits ?? 5,
-      purgeBars: options.purgedCv?.purgeBars ?? 1,
-      embargoBars: options.purgedCv?.embargoBars ?? 1,
-    };
-    const purgedCvEvidence = await quant.purgedCv(
-      selectedStrategy,
-      validationCandles,
-      purgedCvOptions,
-      options.annualization
-    );
-    await heartbeat?.ensure();
+    const purgedCvEvidence = selected.purgedCv;
 
     const finalHoldoutBacktest = await quant.backtest(
       selectedStrategy,
@@ -767,6 +769,14 @@ function isLeaseCapableResearchLedger(
 }
 
 function compareTrialEvaluations(a: TrialEvaluation, b: TrialEvaluation): number {
+  const aMedian = a.purgedCv.medianSharpe ?? Number.NEGATIVE_INFINITY;
+  const bMedian = b.purgedCv.medianSharpe ?? Number.NEGATIVE_INFINITY;
+  if (bMedian !== aMedian) return bMedian - aMedian;
+
+  const aPositive = a.purgedCv.positiveSharpeFraction ?? Number.NEGATIVE_INFINITY;
+  const bPositive = b.purgedCv.positiveSharpeFraction ?? Number.NEGATIVE_INFINITY;
+  if (bPositive !== aPositive) return bPositive - aPositive;
+
   if (b.backtest.sharpe !== a.backtest.sharpe) return b.backtest.sharpe - a.backtest.sharpe;
   const ap = a.record.metrics.pValue ?? 1;
   const bp = b.record.metrics.pValue ?? 1;
