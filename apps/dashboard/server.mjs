@@ -5,13 +5,17 @@ import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { searchTradingViewMarkets } from "../../packages/market-data/dist/tradingview.js";
+import {
+  TradingViewMarketDataProvider,
+  searchTradingViewMarkets
+} from "../../packages/market-data/dist/tradingview.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(root, "../..");
 const port = Number(process.env.QUANT_DASHBOARD_PORT ?? 4173);
 const reportPath = resolve(process.env.QUANT_REPORT_PATH ?? ".data/universe-report.json");
 const demoPath = join(root, "demo-report.json");
+const tradesPath = resolve(process.env.QUANT_TRADES_PATH ?? ".data/trades.json");
 const researchRunnerPath = join(repoRoot, "apps", "api", "dist", "universe.js");
 const supportedMarketTypes = new Set([
   "",
@@ -23,7 +27,13 @@ const supportedMarketTypes = new Set([
   "index",
   "economic"
 ]);
-const supportedTimeframes = new Set(["15m", "1h", "4h", "1d"]);
+const supportedTimeframes = new Set(["5m", "15m", "1h", "4h", "1d"]);
+const marketDataProvider = new TradingViewMarketDataProvider({
+  token: process.env.TRADINGVIEW_SESSION_ID,
+  signature: process.env.TRADINGVIEW_SESSION_SIGNATURE,
+  session: process.env.TRADINGVIEW_MARKET_SESSION === "extended" ? "extended" : "regular",
+  includeCurrentHistoricalBar: false
+});
 
 const types = {
   ".html": "text/html; charset=utf-8",
@@ -41,6 +51,20 @@ const server = createServer(async (req, res) => {
         return sendJson(res, 405, { error: "Use GET to search TradingView markets." });
       }
       return searchMarkets(url, res);
+    }
+
+    if (url.pathname === "/api/market/history") {
+      if (req.method !== "GET") {
+        return sendJson(res, 405, { error: "Use GET to load market history." });
+      }
+      return marketHistory(url, res);
+    }
+
+    if (url.pathname === "/api/trades") {
+      if (req.method !== "GET") {
+        return sendJson(res, 405, { error: "Use GET to read recorded trades." });
+      }
+      return recordedTrades(url, res);
     }
 
     if (url.pathname === "/api/research/once") {
@@ -87,6 +111,65 @@ async function searchMarkets(url, res) {
   } catch (error) {
     return sendJson(res, 502, {
       error: errorMessage(error, "TradingView market search failed.")
+    });
+  }
+}
+
+async function marketHistory(url, res) {
+  const symbol = normalizeSearchResultId(url.searchParams.get("symbol"));
+  const timeframe = (url.searchParams.get("timeframe") ?? "").trim();
+  const rawLimit = Number(url.searchParams.get("limit") ?? 300);
+  const limit = Number.isInteger(rawLimit) ? Math.min(1000, Math.max(50, rawLimit)) : 300;
+
+  if (!symbol) {
+    return sendJson(res, 400, { error: "Choose a valid exchange-qualified TradingView market." });
+  }
+  if (!supportedTimeframes.has(timeframe)) {
+    return sendJson(res, 400, { error: "Unsupported timeframe. Use 5m, 15m, 1h, 4h or 1d." });
+  }
+
+  try {
+    const candles = await marketDataProvider.getHistoricalOHLCV(symbol, timeframe, limit);
+    return sendJson(res, 200, { symbol, timeframe, candles });
+  } catch (error) {
+    return sendJson(res, 502, {
+      error: errorMessage(error, "TradingView history failed.")
+    });
+  }
+}
+
+async function recordedTrades(url, res) {
+  const symbol = normalizeSearchResultId(url.searchParams.get("symbol"));
+  if (!symbol) {
+    return sendJson(res, 400, { error: "Choose a valid exchange-qualified TradingView market." });
+  }
+
+  try {
+    const payload = await readJsonWithFallback(tradesPath, null);
+    const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.trades) ? payload.trades : [];
+    const trades = rows
+      .filter((trade) => normalizeSearchResultId(trade?.symbol) === symbol)
+      .filter((trade) => trade?.mode === "paper" || trade?.mode === "live")
+      .filter((trade) => trade?.side === "BUY" || trade?.side === "SELL")
+      .filter((trade) =>
+        Number.isFinite(Number(trade?.timestamp)) &&
+        Number.isFinite(Number(trade?.price))
+      )
+      .map((trade) => ({
+        id: String(trade.id ?? [trade.symbol, trade.timestamp, trade.side].join(":")),
+        symbol,
+        mode: trade.mode,
+        side: trade.side,
+        timestamp: Number(trade.timestamp),
+        price: Number(trade.price),
+        quantity: Number.isFinite(Number(trade.quantity)) ? Number(trade.quantity) : null,
+        strategyId: typeof trade.strategyId === "string" ? trade.strategyId : null
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    return sendJson(res, 200, { symbol, trades });
+  } catch (error) {
+    return sendJson(res, 500, {
+      error: errorMessage(error, "Could not read recorded trades.")
     });
   }
 }
@@ -217,6 +300,7 @@ async function readJsonWithFallback(primary, fallback) {
   try {
     return JSON.parse(await readFile(primary, "utf8"));
   } catch {
+    if (!fallback) return [];
     return JSON.parse(await readFile(fallback, "utf8"));
   }
 }
