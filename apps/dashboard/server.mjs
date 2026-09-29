@@ -11,8 +11,13 @@ import {
 } from "../../packages/market-data/dist/tradingview.js";
 import {
   JsonlTradeLedger,
+  PaperExecutor,
   rebuildPaperPortfolio
 } from "../../packages/trade-ledger/dist/index.js";
+import {
+  DEFAULT_RISK_LIMITS,
+  RiskEngine
+} from "../../packages/risk-contracts/dist/index.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(root, "../..");
@@ -22,6 +27,8 @@ const demoPath = join(root, "demo-report.json");
 const tradesPath = resolve(process.env.QUANT_TRADES_PATH ?? ".data/trades.jsonl");
 const tradeLedger = new JsonlTradeLedger(tradesPath);
 const paperInitialCash = positiveNumber(process.env.PAPER_INITIAL_CASH, 100_000);
+const paperSlippageBps = nonNegativeNumber(process.env.PAPER_SLIPPAGE_BPS, 2);
+const paperFeeBps = nonNegativeNumber(process.env.PAPER_FEE_BPS, 5);
 const researchRunnerPath = join(repoRoot, "apps", "api", "dist", "universe.js");
 const supportedMarketTypes = new Set([
   "",
@@ -64,6 +71,13 @@ const server = createServer(async (req, res) => {
         return sendJson(res, 405, { error: "Use GET to load market history." });
       }
       return marketHistory(url, res);
+    }
+
+    if (url.pathname === "/api/paper/order") {
+      if (req.method !== "POST") {
+        return sendJson(res, 405, { error: "Use POST to place a paper order." });
+      }
+      return paperOrder(req, res);
     }
 
     if (url.pathname === "/api/portfolio") {
@@ -147,6 +161,84 @@ async function marketHistory(url, res) {
   } catch (error) {
     return sendJson(res, 502, {
       error: errorMessage(error, "TradingView history failed.")
+    });
+  }
+}
+
+async function paperOrder(req, res) {
+  let payload;
+  try {
+    payload = await readJsonRequest(req);
+  } catch (error) {
+    const status = error?.statusCode === 413 ? 413 : 400;
+    return sendJson(res, status, { error: errorMessage(error, "Invalid request body.") });
+  }
+
+  const symbol = normalizeSearchResultId(payload?.symbol);
+  const side = payload?.side === "BUY" || payload?.side === "SELL" ? payload.side : null;
+  const quantity = Number(payload?.quantity);
+  const price = Number(payload?.price);
+  const strategyId =
+    typeof payload?.strategyId === "string" && payload.strategyId.trim()
+      ? payload.strategyId.trim().slice(0, 128)
+      : "manual-paper";
+
+  if (!symbol) {
+    return sendJson(res, 400, { error: "Choose a valid exchange-qualified market." });
+  }
+  if (!side) {
+    return sendJson(res, 400, { error: "Paper order side must be BUY or SELL." });
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return sendJson(res, 400, { error: "Paper order quantity must be positive." });
+  }
+  if (!Number.isFinite(price) || price <= 0) {
+    return sendJson(res, 400, { error: "Paper order price must be positive." });
+  }
+
+  try {
+    const portfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
+    const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
+    const executor = new PaperExecutor(tradeLedger, {
+      slippageBps: paperSlippageBps,
+      feeBps: paperFeeBps
+    });
+    const order = {
+      symbol,
+      side,
+      quantity,
+      price,
+      leverage: 1,
+      strategyId,
+      reduceOnly:
+        typeof payload?.reduceOnly === "boolean"
+          ? payload.reduceOnly
+          : side === "SELL"
+    };
+    const result = await executor.executeAgainstPortfolio(
+      order,
+      portfolio,
+      risk,
+      { [symbol]: price },
+      paperInitialCash
+    );
+
+    if (!result.risk.approved) {
+      return sendJson(res, 409, {
+        error: "Paper order rejected by risk engine.",
+        risk: result.risk,
+        portfolio: result.portfolio
+      });
+    }
+
+    return sendJson(res, 201, {
+      fill: result.fill,
+      risk: result.risk,
+      portfolio: result.portfolio
+    });
+  } catch (error) {
+    return sendJson(res, 400, {
+      error: errorMessage(error, "Paper order could not be settled.")
     });
   }
 }
@@ -316,6 +408,11 @@ async function readJsonRequest(req) {
 function positiveNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function nonNegativeNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function errorMessage(error, fallback) {
