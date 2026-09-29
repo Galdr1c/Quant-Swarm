@@ -82,7 +82,7 @@
       vec2 uv = (frag * 2.0 - uResolution.xy) / max(uResolution.y, 1.0);
       vec2 pointer = (uPointer * 2.0 - 1.0) * vec2(uResolution.x / max(uResolution.y, 1.0), 1.0);
 
-      float t = uTime * 0.065;
+      float t = uTime * 0.025;
       vec2 drift = vec2(t * 0.55, -t * 0.31);
       vec2 warped = uv + drift + 0.05 * pointer;
 
@@ -91,23 +91,23 @@
       float ribbon = sin((uv.x * 1.35 + uv.y * 0.72 + n1 * 1.8 - t * 5.4) * 2.4);
       ribbon = smoothstep(0.92, 0.1, abs(ribbon)) * (0.28 + n2 * 0.48);
 
-      vec3 deep = vec3(0.035, 0.035, 0.12);
-      vec3 violet = vec3(0.31, 0.18, 0.62);
-      vec3 cyan = vec3(0.17, 0.72, 0.83);
-      vec3 pink = vec3(0.75, 0.28, 0.58);
+      vec3 deep = vec3(0.018, 0.028, 0.045);
+      vec3 violet = vec3(0.18, 0.20, 0.34);
+      vec3 cyan = vec3(0.20, 0.62, 0.70);
+      vec3 pink = vec3(0.36, 0.30, 0.55);
       vec3 color = mix(deep, violet, clamp(n1 * 0.72 + 0.05, 0.0, 1.0));
-      color += cyan * ribbon * 0.23;
-      color += pink * smoothstep(0.55, 0.9, n2) * 0.13;
+      color += cyan * ribbon * 0.08;
+      color += pink * smoothstep(0.55, 0.9, n2) * 0.04;
 
       float vignette = smoothstep(1.55, 0.18, length(uv * vec2(0.72, 1.0)));
       color *= 0.68 + vignette * 0.42;
 
       float stars = starField(uv + vec2(t * 0.08, 0.0), 18.0, 2.0);
       stars += starField(uv * 1.13 - vec2(t * 0.04, 0.0), 31.0, 9.0) * 0.45;
-      color += stars * vec3(1.0, 0.9, 0.56) * 0.85;
+      color += stars * vec3(0.72, 0.88, 1.0) * 0.24;
 
       float pointerGlow = exp(-3.2 * length(uv - pointer * 0.16));
-      color += pointerGlow * vec3(0.13, 0.18, 0.31);
+      color += pointerGlow * vec3(0.05, 0.09, 0.13);
 
       fragColor = vec4(color, 1.0);
     }
