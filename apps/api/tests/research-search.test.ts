@@ -66,7 +66,7 @@ function candles(start: number): OHLCV[] {
 }
 
 class FakeQuantClient implements ResearchQuantClient {
-  readonly validationSharpes: Record<string, number> = { s1: 0.8, s2: 1.5, s3: 1.1 };
+  readonly validationSharpes: Record<string, number> = { s1: 2.0, s2: 1.5, s3: 1.1 };
   finalStrategyId?: string;
   evidenceSeen?: unknown;
   calibrationCandlesSeen?: OHLCV[];
@@ -156,11 +156,12 @@ class FakeQuantClient implements ResearchQuantClient {
   }
 
   async purgedCv(
-    _strategy: StrategyDefinition,
+    strategy: StrategyDefinition,
     rows: OHLCV[],
     options: { nSplits: number; purgeBars: number; embargoBars: number }
   ) {
     const foldSize = Math.floor(rows.length / options.nSplits);
+    const baseSharpe = strategy.id === "s2" ? 0.8 : strategy.id === "s3" ? 0.5 : 0.1;
     const folds = Array.from({ length: options.nSplits }, (_, index) => {
       const start = index * foldSize;
       const end = index === options.nSplits - 1 ? rows.length : (index + 1) * foldSize;
@@ -170,8 +171,8 @@ class FakeQuantClient implements ResearchQuantClient {
         testObservations: end - start,
         testStartTimestamp: rows[start].timestamp,
         testEndTimestamp: rows[end - 1].timestamp,
-        sharpe: index === options.nSplits - 1 ? -0.1 : 0.5 + index * 0.1,
-        netReturn: index === options.nSplits - 1 ? -0.2 : 0.8,
+        sharpe: index === options.nSplits - 1 ? baseSharpe - 0.2 : baseSharpe + index * 0.02,
+        netReturn: index === options.nSplits - 1 ? -0.2 : baseSharpe,
         maxDrawdown: 4,
         totalTrades: 8,
         annualization: 365.25 * 24 * 60,
@@ -184,8 +185,8 @@ class FakeQuantClient implements ResearchQuantClient {
       embargoBars: options.embargoBars,
       evaluatedFolds: folds.length,
       positiveSharpeFraction: folds.filter((fold) => fold.sharpe > 0).length / folds.length,
-      medianSharpe: 0.6,
-      meanNetReturn: 0.6,
+      medianSharpe: baseSharpe,
+      meanNetReturn: baseSharpe,
       worstMaxDrawdown: 4,
       folds,
     };
@@ -244,6 +245,8 @@ describe("runResearchSearch", () => {
     expect(quant.calibrationCandlesSeen?.[0].timestamp).toBe(calibration[0].timestamp);
     expect(result.regimeCalibration.lookback).toBe(5);
     expect(result.selectedStrategy.id).toBe("s2");
+    // s1 has the strongest full-slice Sharpe (2.0), but s2 wins because its
+    // fold-level median Sharpe is more robust.
     expect(result.validationBacktest.sharpe).toBe(1.5);
     expect(quant.finalStrategyId).toBe("s2");
     expect(result.finalHoldoutBacktest.sharpe).toBe(0.7);
