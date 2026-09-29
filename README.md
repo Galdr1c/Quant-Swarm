@@ -5,28 +5,27 @@
 
 ### Price chart and trade markers
 
-The dashboard can load closed TradingView candles for the selected market at **5m, 15m, 1h, 4h, or 1d**. Changing the chart timeframe changes the price series immediately; **Analyze <timeframe>** runs the one-off research pipeline for that exact market/timeframe.
+The dashboard loads closed TradingView candles for the selected market at **5m, 15m, 1h, 4h, or 1d**. Changing the chart timeframe refreshes the price series immediately; **Analyze <timeframe>** runs the one-off research pipeline for that exact market/timeframe.
 
-Paper/live fills are rendered on the price line when `QUANT_TRADES_PATH` points to a JSON file shaped like:
+Trade markers come from the append-only native trade ledger at `QUANT_TRADES_PATH` (default `.data/trades.jsonl`). `@quant-swarm/trade-ledger` provides:
+
+- `PaperExecutor`: passes every proposed paper order through the sovereign `RiskEngine`, applies configurable adverse slippage/fees, then persists the fill.
+- `JsonlTradeLedger`: idempotent append/list storage for paper and broker-recorded live fills.
+- `brokerFill(...)`: validates and normalizes an already-executed broker fill. It does **not** place a live order.
+
+Each JSONL row contains a normalized fill such as:
 
 ```json
-{
-  "trades": [
-    {
-      "id": "paper-001",
-      "symbol": "NASDAQ:AAPL",
-      "mode": "paper",
-      "side": "BUY",
-      "timestamp": 1789990000000,
-      "price": 225.4,
-      "quantity": 10,
-      "strategyId": "aapl-example"
-    }
-  ]
-}
+{"schemaVersion":1,"id":"paper-001","symbol":"NASDAQ:AAPL","mode":"paper","side":"BUY","timestamp":1789990000000,"price":225.4,"quantity":10,"notional":2254,"fee":1.127,"strategyId":"aapl-example","source":"paper-executor"}
 ```
 
-`mode` must be `paper` or `live`; no live fill is fabricated when an execution adapter/ledger has not recorded one.
+The dashboard never fabricates a live/real marker. A `mode:"live"` point appears only when a broker integration has recorded a validated broker fill in the ledger.
+
+### Holdout integrity
+
+Every research run now fingerprints the complete split and the final holdout. Trial records carry dataset/holdout tags, and completed run records persist the dataset fingerprint, holdout fingerprint, split timestamp ranges, final-holdout metrics, annualization, and deterministic validation verdict/checks.
+
+By default, a later run using the **identical already-consumed final holdout** is rejected. Set `RESEARCH_ALLOW_HOLDOUT_REUSE=true` only for an intentional controlled re-test. Universe research uses the configured durable research ledger; the JSONL backend is serialized to one asset at a time, while Postgres keeps multi-asset concurrency.
 
 ## Architecture
 
