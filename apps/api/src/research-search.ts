@@ -72,6 +72,12 @@ export interface ResearchQuantClient {
     candles: OHLCV[],
     calibration: RegimeCalibration
   ): Promise<RegimeReturnEvidence>;
+  purgedCv(
+    strategy: StrategyDefinition,
+    candles: OHLCV[],
+    options: Required<Pick<PurgedCvEvidence, "nSplits" | "purgeBars" | "embargoBars">>,
+    annualization?: number
+  ): Promise<PurgedCvEvidence>;
   validateResearch(
     result: BacktestWithEquity,
     evidence: ResearchValidationEvidence
@@ -360,6 +366,19 @@ export async function runResearchSearch(params: {
     }
 
     const validationBacktest = selected.backtest;
+    const purgedCvOptions = {
+      nSplits: options.purgedCv?.nSplits ?? 5,
+      purgeBars: options.purgedCv?.purgeBars ?? 1,
+      embargoBars: options.purgedCv?.embargoBars ?? 1,
+    };
+    const purgedCvEvidence = await quant.purgedCv(
+      selectedStrategy,
+      validationCandles,
+      purgedCvOptions,
+      options.annualization
+    );
+    await heartbeat?.ensure();
+
     const finalHoldoutBacktest = await quant.backtest(
       selectedStrategy,
       finalHoldoutCandles,
@@ -375,12 +394,7 @@ export async function runResearchSearch(params: {
         validationBacktest.annualization,
         inferAnnualization(validationCandles)
       ),
-      purgedCv: {
-        nObservations: validationCandles.length,
-        nSplits: options.purgedCv?.nSplits ?? 5,
-        purgeBars: options.purgedCv?.purgeBars ?? 1,
-        embargoBars: options.purgedCv?.embargoBars ?? 1,
-      },
+      purgedCv: purgedCvEvidence,
     });
     const researchValidation = await quant.validateResearch(finalHoldoutBacktest, evidence);
     const runEvidence: ResearchRunEvidence = {
@@ -501,6 +515,24 @@ export class HttpResearchQuantClient implements ResearchQuantClient {
       candles,
       equityCurve,
       calibration,
+    });
+  }
+
+  purgedCv(
+    strategy: StrategyDefinition,
+    candles: OHLCV[],
+    options: Required<Pick<PurgedCvEvidence, "nSplits" | "purgeBars" | "embargoBars">>,
+    annualization?: number
+  ): Promise<PurgedCvEvidence> {
+    return this.post<PurgedCvEvidence>("/validate/purged-cv", {
+      strategy,
+      candles,
+      nSplits: options.nSplits,
+      purgeBars: options.purgeBars,
+      embargoBars: options.embargoBars,
+      ...(annualization !== undefined
+        ? { config: { candles_per_year: annualization } }
+        : {}),
     });
   }
 
