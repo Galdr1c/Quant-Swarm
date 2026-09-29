@@ -560,7 +560,7 @@ function stableJson(value: unknown): string {
       .map(([key, entry]) => JSON.stringify(key) + ":" + stableJson(entry))
       .join(",") + "}";
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? "null";
 }
 
 export function inferAnnualization(candles: readonly OHLCV[]): number {
