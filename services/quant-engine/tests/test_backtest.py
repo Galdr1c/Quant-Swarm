@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 
 from src.backtest import engine
+from src.backtest.strategy_runner import evaluate_rule
 
 
 def _strategy(risk=None):
@@ -72,3 +74,25 @@ def test_equity_curve_is_marked_to_market(monkeypatch):
     assert result.max_drawdown > 0
     assert result.fees_paid > 0
     assert result.slippage_paid > 0
+
+
+def test_annualization_is_inferred_from_hourly_timestamps(monkeypatch):
+    entry = np.array([True, False, False, False, False])
+    exit_ = np.array([False, True, False, False, False])
+    monkeypatch.setattr(engine, "generate_signals", lambda *args, **kwargs: (entry, exit_))
+
+    _, o, h, l, c, v = _bars()
+    ts = np.array([1_700_000_000_000 + i * 3_600_000 for i in range(5)], dtype=np.int64)
+    result = engine.run_backtest(_strategy(), o, h, l, c, v, ts)
+
+    assert result.annualization == pytest.approx(365.25 * 24, rel=1e-6)
+
+
+def test_undefined_indicator_reference_fails_closed():
+    close = np.array([100.0, 101.0, 102.0])
+    with pytest.raises(ValueError, match="undefined indicator"):
+        evaluate_rule(
+            {"left": "missing", "operator": ">", "right": 50},
+            {},
+            close,
+        )
