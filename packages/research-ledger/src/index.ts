@@ -77,6 +77,7 @@ export interface ResearchRunEvidence {
     overallVerdict: ValidationVerdict;
     checks: ValidationCheck[];
   };
+  purgedCv?: PurgedCvEvidence;
 }
 
 export interface ResearchRunRecord {
@@ -815,6 +816,16 @@ function validateRunEvidence(value: ResearchRunEvidence): void {
   }
   if (!Array.isArray(value.researchValidation.checks)) {
     throw new Error("evidence.researchValidation.checks must be an array");
+  }
+  if (value.purgedCv?.folds !== undefined) {
+    if (!Array.isArray(value.purgedCv.folds) || value.purgedCv.folds.length === 0) {
+      throw new Error("evidence.purgedCv.folds must be a non-empty array");
+    }
+    for (const fold of value.purgedCv.folds) {
+      if (!Number.isFinite(fold.sharpe) || !Number.isFinite(fold.netReturn)) {
+        throw new Error("evidence.purgedCv fold metrics must be finite");
+      }
+    }
   }
 }
 
