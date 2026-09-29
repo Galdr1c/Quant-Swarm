@@ -10,6 +10,7 @@ import {
   createTrialRecord,
   type PurgedCvEvidence,
   type ResearchLedger,
+  type ResearchRunEvidence,
   type ResearchTrialRecord,
   type ResearchValidationEvidence,
 } from "@quant-swarm/research-ledger";
@@ -382,6 +383,34 @@ export async function runResearchSearch(params: {
       },
     });
     const researchValidation = await quant.validateResearch(finalHoldoutBacktest, evidence);
+    const runEvidence: ResearchRunEvidence = {
+      datasetFingerprint: datasetIdentity.datasetFingerprint,
+      holdoutFingerprint: datasetIdentity.holdoutFingerprint,
+      annualization: positiveFinite(
+        finalHoldoutBacktest.annualization,
+        inferAnnualization(finalHoldoutCandles)
+      ),
+      split: {
+        discovery: datasetIdentity.discovery,
+        validation: datasetIdentity.validation,
+        finalHoldout: datasetIdentity.finalHoldout,
+      },
+      finalHoldout: {
+        netReturn: finalHoldoutBacktest.netReturn,
+        annualReturn: finalHoldoutBacktest.annualReturn,
+        sharpe: finalHoldoutBacktest.sharpe,
+        sortino: finalHoldoutBacktest.sortino,
+        maxDrawdown: finalHoldoutBacktest.maxDrawdown,
+        profitFactor: finalHoldoutBacktest.profitFactor,
+        expectancy: finalHoldoutBacktest.expectancy,
+        totalTrades: finalHoldoutBacktest.totalTrades,
+        winRate: finalHoldoutBacktest.winRate,
+      },
+      researchValidation: {
+        overallVerdict: researchValidation.overallVerdict,
+        checks: researchValidation.checks,
+      },
+    };
 
     if (leasedLedger && heartbeat) {
       const finalLease = await heartbeat.stopAndRenew();
@@ -389,12 +418,14 @@ export async function runResearchSearch(params: {
         status: "COMPLETED",
         updatedAt: monotonicNow(runCreatedAt),
         selectedTrialId: selected.trialId,
+        evidence: runEvidence,
       });
     } else {
       await (ledger as ResearchLedger).finishRun(options.runId, {
         status: "COMPLETED",
         updatedAt: monotonicNow(runCreatedAt),
         selectedTrialId: selected.trialId,
+        evidence: runEvidence,
       });
     }
 
