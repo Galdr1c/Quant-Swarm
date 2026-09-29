@@ -59,12 +59,6 @@ export interface UniverseResearchReport {
   results: UniverseResearchResult[];
 }
 
-const VERDICT_ORDER: Record<ValidationVerdict, number> = {
-  PASS: 0,
-  REVIEW: 1,
-  FAIL: 2,
-};
-
 export function rankUniverseResults(
   results: readonly UniverseResearchResult[]
 ): UniverseResearchResult[] {
@@ -76,16 +70,15 @@ export function rankUniverseResults(
       if (b.status === "NO_SIGNAL") return 1;
     }
 
-    const av = a.verdict ? VERDICT_ORDER[a.verdict] : 99;
-    const bv = b.verdict ? VERDICT_ORDER[b.verdict] : 99;
-    if (av !== bv) return av - bv;
-
-    const as = a.finalHoldout?.sharpe ?? Number.NEGATIVE_INFINITY;
-    const bs = b.finalHoldout?.sharpe ?? Number.NEGATIVE_INFINITY;
+    // Final holdout is evidence only: it must never decide which asset is
+    // surfaced first. Rank on the validation/OOS slice, then use stable symbol
+    // ordering as the deterministic tiebreaker.
+    const as = a.validation?.sharpe ?? Number.NEGATIVE_INFINITY;
+    const bs = b.validation?.sharpe ?? Number.NEGATIVE_INFINITY;
     if (as !== bs) return bs - as;
 
-    const ar = a.finalHoldout?.netReturn ?? Number.NEGATIVE_INFINITY;
-    const br = b.finalHoldout?.netReturn ?? Number.NEGATIVE_INFINITY;
+    const ar = a.validation?.netReturn ?? Number.NEGATIVE_INFINITY;
+    const br = b.validation?.netReturn ?? Number.NEGATIVE_INFINITY;
     if (ar !== br) return br - ar;
 
     return (a.symbol + ":" + a.timeframe).localeCompare(b.symbol + ":" + b.timeframe);
