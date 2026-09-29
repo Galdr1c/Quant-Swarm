@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   MultiAgentResearchCoordinator,
   type MultiAgentCoordinatorOptions,
@@ -91,6 +92,8 @@ export interface ResearchLeaseOptions {
 export interface ResearchSearchOptions {
   runId: string;
   annualization?: number;
+  /** Explicit escape hatch for controlled experiments. Default rejects an identical consumed holdout. */
+  allowIdenticalHoldoutReuse?: boolean;
   minimumSuccessfulTrials?: number;
   coordinator?: MultiAgentCoordinatorOptions;
   purgedCv?: Omit<PurgedCvEvidence, "nObservations">;
@@ -105,8 +108,17 @@ export interface TrialEvaluation {
   backtest: BacktestWithEquity;
 }
 
+export interface ResearchDatasetIdentity {
+  datasetFingerprint: string;
+  holdoutFingerprint: string;
+  discovery: { observations: number; firstTimestamp: number; lastTimestamp: number };
+  validation: { observations: number; firstTimestamp: number; lastTimestamp: number };
+  finalHoldout: { observations: number; firstTimestamp: number; lastTimestamp: number };
+}
+
 export interface ResearchSearchResult {
   runId: string;
+  datasetIdentity: ResearchDatasetIdentity;
   leaseGeneration?: number;
   selectedTrialId: string;
   selectedStrategy: StrategyDefinition;
@@ -176,6 +188,13 @@ export async function runResearchSearch(params: {
   if (validationCandles.length < 4) throw new Error("validationCandles must contain at least four bars");
   if (finalHoldoutCandles.length < 4) throw new Error("finalHoldoutCandles must contain at least four bars");
 
+  const datasetIdentity = buildDatasetIdentity(
+    event,
+    context,
+    regimeCalibrationCandles,
+    validationCandles,
+    finalHoldoutCandles
+  );
   const runCreatedAt = Date.now();
   const leasedLedger = isLeaseCapableResearchLedger(ledger) ? ledger : undefined;
   let heartbeat: LeaseHeartbeatController | undefined;
@@ -211,6 +230,20 @@ export async function runResearchSearch(params: {
   }
 
   try {
+    if (!options.allowIdenticalHoldoutReuse) {
+      const existingRecords = await ledger.list();
+      const consumed = existingRecords.find(
+        (record) =>
+          record.runId !== options.runId &&
+          record.tags?.includes(`holdout:${datasetIdentity.holdoutFingerprint}`)
+      );
+      if (consumed) {
+        throw new Error(
+          `Final holdout has already been consumed by run ${consumed.runId}; set allowIdenticalHoldoutReuse only for an intentional controlled re-test`
+        );
+      }
+    }
+
     const minimumSuccessfulTrials = Math.max(2, Math.floor(options.minimumSuccessfulTrials ?? 2));
     const regimeCalibration = await quant.calibrateRegimes(
       regimeCalibrationCandles,
@@ -267,6 +300,11 @@ export async function runResearchSearch(params: {
               outOfSampleReturns: equityReturns(backtest.equityCurve),
               regimeReturns: regime.regimeReturns,
             },
+            tags: [
+              `dataset:${datasetIdentity.datasetFingerprint}`,
+              `holdout:${datasetIdentity.holdoutFingerprint}`,
+              `market:${context.targetMarket?.symbol ?? event.symbol}@${context.targetMarket?.timeframe ?? "unknown"}`,
+            ],
           });
           return {
             ok: true,
@@ -362,6 +400,7 @@ export async function runResearchSearch(params: {
 
     return {
       runId: options.runId,
+      datasetIdentity,
       ...(leaseGeneration ? { leaseGeneration } : {}),
       selectedTrialId: selected.trialId,
       selectedStrategy,
@@ -465,6 +504,63 @@ export function equityReturns(equityCurve: readonly number[]): number[] {
     if (Number.isFinite(value)) returns.push(value);
   }
   return returns;
+}
+
+export function buildDatasetIdentity(
+  event: CandidateEvent,
+  context: ResearchContext,
+  discovery: readonly OHLCV[],
+  validation: readonly OHLCV[],
+  finalHoldout: readonly OHLCV[]
+): ResearchDatasetIdentity {
+  const market = context.targetMarket ?? { symbol: event.symbol, timeframe: "unknown" };
+  const datasetFingerprint = fingerprintResearchData({
+    market,
+    discovery,
+    validation,
+    finalHoldout,
+  });
+  const holdoutFingerprint = fingerprintResearchData({
+    market,
+    finalHoldout,
+  });
+  return {
+    datasetFingerprint,
+    holdoutFingerprint,
+    discovery: candleRange(discovery),
+    validation: candleRange(validation),
+    finalHoldout: candleRange(finalHoldout),
+  };
+}
+
+export function fingerprintResearchData(value: unknown): string {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+function candleRange(candles: readonly OHLCV[]): {
+  observations: number;
+  firstTimestamp: number;
+  lastTimestamp: number;
+} {
+  if (candles.length === 0) {
+    return { observations: 0, firstTimestamp: 0, lastTimestamp: 0 };
+  }
+  return {
+    observations: candles.length,
+    firstTimestamp: candles[0].timestamp,
+    lastTimestamp: candles[candles.length - 1].timestamp,
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
+  if (value && typeof value === "object") {
+    return "{" + Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entry]) => JSON.stringify(key) + ":" + stableJson(entry))
+      .join(",") + "}";
+  }
+  return JSON.stringify(value);
 }
 
 export function inferAnnualization(candles: readonly OHLCV[]): number {
