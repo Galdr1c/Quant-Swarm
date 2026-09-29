@@ -155,6 +155,42 @@ class FakeQuantClient implements ResearchQuantClient {
     };
   }
 
+  async purgedCv(
+    _strategy: StrategyDefinition,
+    rows: OHLCV[],
+    options: { nSplits: number; purgeBars: number; embargoBars: number }
+  ) {
+    const foldSize = Math.floor(rows.length / options.nSplits);
+    const folds = Array.from({ length: options.nSplits }, (_, index) => {
+      const start = index * foldSize;
+      const end = index === options.nSplits - 1 ? rows.length : (index + 1) * foldSize;
+      return {
+        fold: index + 1,
+        trainObservations: rows.length - (end - start),
+        testObservations: end - start,
+        testStartTimestamp: rows[start].timestamp,
+        testEndTimestamp: rows[end - 1].timestamp,
+        sharpe: index === options.nSplits - 1 ? -0.1 : 0.5 + index * 0.1,
+        netReturn: index === options.nSplits - 1 ? -0.2 : 0.8,
+        maxDrawdown: 4,
+        totalTrades: 8,
+        annualization: 365.25 * 24 * 60,
+      };
+    });
+    return {
+      nObservations: rows.length,
+      nSplits: options.nSplits,
+      purgeBars: options.purgeBars,
+      embargoBars: options.embargoBars,
+      evaluatedFolds: folds.length,
+      positiveSharpeFraction: folds.filter((fold) => fold.sharpe > 0).length / folds.length,
+      medianSharpe: 0.6,
+      meanNetReturn: 0.6,
+      worstMaxDrawdown: 4,
+      folds,
+    };
+  }
+
   async validateResearch(
     _result: BacktestWithEquity,
     evidence: any
@@ -237,6 +273,8 @@ describe("runResearchSearch", () => {
     expect(result.evidence.cscvReturns?.[0]).toHaveLength(3);
     expect(Object.keys(result.evidence.regimeReturns ?? {})).toEqual(["trending", "ranging", "volatile"]);
     expect(result.evidence.purgedCv?.nObservations).toBe(validation.length);
+    expect(result.evidence.purgedCv?.evaluatedFolds).toBe(5);
+    expect(result.evidence.purgedCv?.folds).toHaveLength(5);
     expect(result.researchValidation.overallVerdict).toBe("PASS");
 
     await expect(runResearchSearch(params)).rejects.toThrow(/already exists/);
