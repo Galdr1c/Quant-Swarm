@@ -219,6 +219,10 @@ describe("runResearchSearch", () => {
     expect(records.every((row) => Object.keys(row.metrics.regimeReturns ?? {}).length === 3)).toBe(true);
     expect(records.every((row) => row.strategySnapshot?.id === row.strategyId)).toBe(true);
     expect(records.every((row) => /^[a-f0-9]{64}$/.test(row.strategyFingerprint ?? ""))).toBe(true);
+    expect(records.every((row) => row.tags?.includes(`holdout:${result.datasetIdentity.holdoutFingerprint}`))).toBe(true);
+    expect(result.datasetIdentity.datasetFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.datasetIdentity.holdoutFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.datasetIdentity.finalHoldout.observations).toBe(40);
 
     const run = await ledger.getRun("run-test");
     expect(run?.status).toBe("COMPLETED");
@@ -233,6 +237,32 @@ describe("runResearchSearch", () => {
     expect(result.researchValidation.overallVerdict).toBe("PASS");
 
     await expect(runResearchSearch(params)).rejects.toThrow(/already exists/);
+  });
+
+  it("rejects a different run that tries to consume the identical final holdout", async () => {
+    const ledger = new MemoryResearchLedger();
+    const firstQuant = new FakeQuantClient();
+    const first = searchParams(ledger, firstQuant, "run-holdout-first");
+    await runResearchSearch(first.params);
+
+    const secondQuant = new FakeQuantClient();
+    const second = searchParams(ledger, secondQuant, "run-holdout-second");
+    await expect(runResearchSearch(second.params)).rejects.toThrow(/Final holdout has already been consumed/);
+
+    const run = await ledger.getRun("run-holdout-second");
+    expect(run?.status).toBe("FAILED");
+  });
+
+  it("allows explicit controlled holdout reuse when the escape hatch is set", async () => {
+    const ledger = new MemoryResearchLedger();
+    const first = searchParams(ledger, new FakeQuantClient(), "run-reuse-first");
+    await runResearchSearch(first.params);
+
+    const second = searchParams(ledger, new FakeQuantClient(), "run-reuse-second");
+    second.params.options.allowIdenticalHoldoutReuse = true;
+    const result = await runResearchSearch(second.params);
+
+    expect(result.runId).toBe("run-reuse-second");
   });
 
   it("rejects hypotheses that target a different market or timeframe", async () => {
