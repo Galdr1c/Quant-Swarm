@@ -776,8 +776,8 @@ function validateRunEvidence(value: ResearchRunEvidence): void {
     if (!Number.isSafeInteger(range.observations) || range.observations <= 0) {
       throw new Error(`evidence.split.${name}.observations must be positive`);
     }
-    validateTimestamp(range.firstTimestamp, `evidence.split.${name}.firstTimestamp`);
-    validateTimestamp(range.lastTimestamp, `evidence.split.${name}.lastTimestamp`);
+    validateMarketTimestamp(range.firstTimestamp, `evidence.split.${name}.firstTimestamp`);
+    validateMarketTimestamp(range.lastTimestamp, `evidence.split.${name}.lastTimestamp`);
     if (range.lastTimestamp < range.firstTimestamp) {
       throw new Error(`evidence.split.${name} timestamps are reversed`);
     }
@@ -813,6 +813,12 @@ function validateRunId(value: unknown): asserts value is string {
 
 function validateTimestamp(value: number, name: string): void {
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive timestamp`);
+}
+
+function validateMarketTimestamp(value: number, name: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative market timestamp`);
+  }
 }
 
 function validateReturnPath(path: unknown, name: string): void {
