@@ -17,7 +17,6 @@ import type { CandidateEvent, OHLCV } from "@quant-swarm/shared";
 import { parseSubscriptions, parseTradingViewSession } from "./live-config.js";
 import { HttpResearchQuantClient, runResearchSearch } from "./research-search.js";
 import {
-  annualizationForTimeframe,
   buildUniverseReport,
   downsampleSeries,
   type UniverseBacktestSnapshot,
@@ -184,7 +183,7 @@ async function researchAsset(params: {
     const annualization =
       Number.isFinite(annualizationOverride) && annualizationOverride > 0
         ? annualizationOverride
-        : annualizationForTimeframe(subscription.timeframe);
+        : undefined;
 
     const result = await runResearchSearch({
       event,
@@ -197,7 +196,7 @@ async function researchAsset(params: {
       quant: params.quant,
       options: {
         runId,
-        annualization,
+        ...(annualization !== undefined ? { annualization } : {}),
         coordinator: {
           maxConcurrency: integerEnv("RESEARCH_MAX_CONCURRENCY", 3, 1, 16),
           timeoutMs: integerEnv("RESEARCH_AGENT_TIMEOUT_MS", 90_000, 1000, 600_000),
