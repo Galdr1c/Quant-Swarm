@@ -302,7 +302,7 @@ function renderDetail(row, index) {
     escapeHtml(row.selectedStrategy?.name || statusLabel(row.status)) +
     "</strong><br>" +
     (row.runId ? "Run: " + escapeHtml(row.runId) + "<br>" : "") +
-    "The cartoon fleet is decorative. Ranking still uses verdict first, then untouched final-holdout Sharpe and return — never a promise of future profitability.</div>";
+    "The cartoon fleet is decorative. Ranking uses validation/OOS metrics only; final holdout is displayed as post-selection evidence and never decides fleet order.</div>";
 }
 
 function detail(label, value) {
