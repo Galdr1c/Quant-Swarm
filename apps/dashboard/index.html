@@ -173,6 +173,21 @@
             <span><small>Unrealized PnL</small><strong id="paper-unrealized">—</strong></span>
             <span><small>Open positions</small><strong id="paper-positions">—</strong></span>
           </div>
+          <div class="paper-trade-panel" aria-label="Paper trading controls">
+            <div>
+              <span class="panel-kicker">PAPER ONLY</span>
+              <strong id="paper-order-market">Select a market</strong>
+              <small>Uses latest closed chart price · risk-gated · no live execution</small>
+            </div>
+            <label class="paper-qty-label">
+              <span>Qty</span>
+              <input id="paper-order-quantity" type="number" min="0.00000001" step="any" value="1" inputmode="decimal">
+            </label>
+            <div class="paper-order-buttons">
+              <button id="paper-buy-button" type="button" disabled>Paper Buy</button>
+              <button id="paper-sell-button" type="button" disabled>Paper Sell</button>
+            </div>
+          </div>
         </article>
 
         <article class="evidence-tower cartoon-surface tilt-card">
