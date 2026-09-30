@@ -42,10 +42,9 @@ describe("trade ledger and paper executor", () => {
     });
     const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
 
-    const portfolio = new PaperPortfolio(100_000);
-    const result = await executor.executeAgainstPortfolio(
+    const result = await executor.executeFromLedger(
       order(),
-      portfolio,
+      100_000,
       risk,
       { "NASDAQ:AAPL": 200 },
       100_000
@@ -75,10 +74,9 @@ describe("trade ledger and paper executor", () => {
     const executor = new PaperExecutor(ledger, { idFactory: () => "never-used" });
     const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
 
-    const portfolio = new PaperPortfolio(100_000);
-    const result = await executor.executeAgainstPortfolio(
+    const result = await executor.executeFromLedger(
       order(),
-      portfolio,
+      100_000,
       risk,
       { "NASDAQ:AAPL": 200 },
       105_000
@@ -100,11 +98,9 @@ describe("trade ledger and paper executor", () => {
       idFactory: () => ids.shift()!,
     });
     const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
-    const portfolio = new PaperPortfolio(100_000);
-
-    const buy = await executor.executeAgainstPortfolio(
+    const buy = await executor.executeFromLedger(
       order(),
-      portfolio,
+      100_000,
       risk,
       { "NASDAQ:AAPL": 200 },
       100_000
@@ -117,13 +113,14 @@ describe("trade ledger and paper executor", () => {
       averageEntryPrice: 200,
     });
 
-    const marked = portfolio.snapshot({ "NASDAQ:AAPL": 210 });
+    const afterBuy = await rebuildPaperPortfolio(ledger, 100_000);
+    const marked = afterBuy.snapshot({ "NASDAQ:AAPL": 210 });
     expect(marked.equity).toBeCloseTo(100_100);
     expect(marked.unrealizedPnl).toBeCloseTo(100);
 
-    const sell = await executor.executeAgainstPortfolio(
+    const sell = await executor.executeFromLedger(
       { ...order(), side: "SELL", quantity: 5, price: 210, reduceOnly: true },
-      portfolio,
+      100_000,
       risk,
       { "NASDAQ:AAPL": 210 },
       100_000
@@ -134,7 +131,8 @@ describe("trade ledger and paper executor", () => {
     expect(sell.portfolio?.positions[0].quantity).toBeCloseTo(5);
     expect(sell.portfolio?.unrealizedPnl).toBeCloseTo(50);
 
-    const riskState = portfolio.toRiskState({ "NASDAQ:AAPL": 210 }, 100_000);
+    const afterSell = await rebuildPaperPortfolio(ledger, 100_000);
+    const riskState = afterSell.toRiskState({ "NASDAQ:AAPL": 210 }, 100_000);
     expect(riskState.equity).toBeCloseTo(100_100);
     expect(riskState.dailyPnl).toBeCloseTo(100);
     expect(riskState.totalExposurePct).toBeGreaterThan(0);
@@ -162,16 +160,14 @@ describe("trade ledger and paper executor", () => {
       },
       "paper"
     );
-    const portfolio = new PaperPortfolio(100_000);
-
-    const result = await executor.executeAgainstPortfolio(
+    const result = await executor.executeFromLedger(
       {
         ...order(),
         quantity: 100,
         price: 200,
         reduceOnly: true,
       },
-      portfolio,
+      100_000,
       risk,
       { "NASDAQ:AAPL": 200 },
       100_000
@@ -190,12 +186,10 @@ describe("trade ledger and paper executor", () => {
       idFactory: () => "bad-sell",
     });
     const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
-    const portfolio = new PaperPortfolio(100_000);
-
     await expect(
-      executor.executeAgainstPortfolio(
+      executor.executeFromLedger(
         { ...order(), side: "SELL", quantity: 1, reduceOnly: true },
-        portfolio,
+        100_000,
         risk,
         { "NASDAQ:AAPL": 200 }
       )
@@ -220,11 +214,9 @@ describe("trade ledger and paper executor", () => {
       },
       "paper"
     );
-    const portfolio = new PaperPortfolio(100_000);
-
-    const result = await executor.executeAgainstPortfolio(
+    const result = await executor.executeFromLedger(
       { ...order(), quantity: 50, price: 200 },
-      portfolio,
+      100_000,
       risk,
       { "NASDAQ:AAPL": 200 },
       103_000
@@ -232,7 +224,7 @@ describe("trade ledger and paper executor", () => {
 
     expect(result.risk).toEqual({ approved: false, reason: "DAILY_LOSS_LIMIT" });
     expect(await ledger.list()).toEqual([]);
-    expect(portfolio.snapshot().cash).toBe(100_000);
+    expect((await rebuildPaperPortfolio(ledger, 100_000)).snapshot().cash).toBe(100_000);
   });
 
   it("rejects and sticks the kill switch when settlement costs cross max drawdown", async () => {
@@ -256,11 +248,9 @@ describe("trade ledger and paper executor", () => {
       false,
       killSwitch
     );
-    const portfolio = new PaperPortfolio(100_000);
-
-    const result = await executor.executeAgainstPortfolio(
+    const result = await executor.executeFromLedger(
       { ...order(), quantity: 50, price: 200 },
-      portfolio,
+      100_000,
       risk,
       { "NASDAQ:AAPL": 200 },
       100_000,
@@ -270,7 +260,7 @@ describe("trade ledger and paper executor", () => {
     expect(result.risk).toEqual({ approved: false, reason: "MAX_DRAWDOWN" });
     expect(risk.isKillSwitchActive()).toBe(true);
     expect(await ledger.list()).toEqual([]);
-    expect(portfolio.snapshot().cash).toBe(100_000);
+    expect((await rebuildPaperPortfolio(ledger, 100_000)).snapshot().cash).toBe(100_000);
   });
 
   it("persists a sticky kill switch across store instances", async () => {
