@@ -496,7 +496,15 @@ export class PaperExecutor {
       historicalPeakEquity
     );
     const executionPrice = this.executionPrice(order);
-    const risk = riskEngine.evaluateOrder({ ...order, price: executionPrice }, state);
+    // PaperPortfolio is deliberately long-only. Canonicalize reduce-only intent
+    // from settlement semantics rather than trusting a caller-provided flag:
+    // every SELL reduces an existing long; BUY can never be reduce-only.
+    const riskOrder: ProposedOrder = {
+      ...order,
+      price: executionPrice,
+      reduceOnly: order.side === "SELL",
+    };
+    const risk = riskEngine.evaluateOrder(riskOrder, state);
     if (!risk.approved) {
       return {
         risk,
