@@ -20,6 +20,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      - name: Check dashboard server syntax
+        run: node --check apps/dashboard/server.mjs
 
   python:
     runs-on: ubuntu-latest
