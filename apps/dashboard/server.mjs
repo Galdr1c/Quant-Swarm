@@ -187,7 +187,8 @@ async function paperOrder(req, res) {
   const symbol = normalizeSearchResultId(payload?.symbol);
   const side = payload?.side === "BUY" || payload?.side === "SELL" ? payload.side : null;
   const quantity = Number(payload?.quantity);
-  const price = Number(payload?.price);
+  const timeframe =
+    typeof payload?.timeframe === "string" ? payload.timeframe.trim() : "";
   const strategyId =
     typeof payload?.strategyId === "string" && payload.strategyId.trim()
       ? payload.strategyId.trim().slice(0, 128)
@@ -202,11 +203,22 @@ async function paperOrder(req, res) {
   if (!Number.isFinite(quantity) || quantity <= 0) {
     return sendJson(res, 400, { error: "Paper order quantity must be positive." });
   }
-  if (!Number.isFinite(price) || price <= 0) {
-    return sendJson(res, 400, { error: "Paper order price must be positive." });
+  if (!supportedTimeframes.has(timeframe)) {
+    return sendJson(res, 400, {
+      error: "Paper order timeframe must be one of: 5m, 15m, 1h, 4h, 1d."
+    });
   }
 
   try {
+    const candles = await marketDataProvider.getHistoricalOHLCV(symbol, timeframe, 50);
+    const referenceCandle = candles.at(-1);
+    const price = Number(referenceCandle?.close);
+    if (!referenceCandle || !Number.isFinite(price) || price <= 0) {
+      const error = new Error("TradingView returned no valid closed price for paper execution.");
+      error.statusCode = 502;
+      throw error;
+    }
+
     const marks = { [symbol]: price };
     const currentPortfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
     const currentSnapshot = currentPortfolio.snapshot(marks);
@@ -248,7 +260,12 @@ async function paperOrder(req, res) {
         portfolio,
         dayState: updatedDayState,
         dailyPnl,
-        dailyPnlPct
+        dailyPnlPct,
+        referenceCandle: {
+          timeframe,
+          timestamp: referenceCandle.timestamp,
+          close: price
+        }
       });
     }
 
@@ -258,10 +275,16 @@ async function paperOrder(req, res) {
       portfolio,
       dayState: updatedDayState,
       dailyPnl,
-      dailyPnlPct
+      dailyPnlPct,
+      referenceCandle: {
+        timeframe,
+        timestamp: referenceCandle.timestamp,
+        close: price
+      }
     });
   } catch (error) {
-    return sendJson(res, 400, {
+    const status = error?.statusCode === 502 ? 502 : 400;
+    return sendJson(res, status, {
       error: errorMessage(error, "Paper order could not be settled.")
     });
   }
