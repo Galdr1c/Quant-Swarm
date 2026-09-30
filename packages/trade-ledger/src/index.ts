@@ -104,7 +104,7 @@ export class JsonPaperDayStateStore {
       typeof value === "object" &&
       (value as Partial<PaperDayState>).schemaVersion === 1 &&
       (value as Partial<PaperDayState>).peakEquity === undefined &&
-      Number.isFinite((value as Partial<PaperDayState>).dayStartEquity)
+      Number.isFinite(Number((value as Partial<PaperDayState>).dayStartEquity))
     ) {
       value = {
         ...(value as Record<string, unknown>),
