@@ -6,6 +6,8 @@ const state = {
   chartTimeframe: "1h",
   priceCandles: [],
   tradeMarkers: [],
+  paperTradingReady: false,
+  paperKillSwitchActive: false,
 };
 
 let marketSearchTimer = null;
@@ -363,6 +365,8 @@ function syncChartControls() {
   const paperBusy =
     $("paper-buy-button")?.getAttribute("aria-busy") === "true" ||
     $("paper-sell-button")?.getAttribute("aria-busy") === "true";
+  const paperAllowed =
+    state.paperTradingReady && !state.paperKillSwitchActive;
 
   const orderMarket = $("paper-order-market");
   if (orderMarket) {
@@ -373,7 +377,10 @@ function syncChartControls() {
   }
   ["paper-buy-button", "paper-sell-button"].forEach((id) => {
     const button = $(id);
-    if (button) button.disabled = !symbol || !hasTradablePrice || !validQuantity || paperBusy;
+    if (button) {
+      button.disabled =
+        !symbol || !hasTradablePrice || !validQuantity || paperBusy || !paperAllowed;
+    }
   });
 
   const analyze = $("chart-research-button");
@@ -507,6 +514,15 @@ async function loadPaperPortfolio(symbol) {
     const portfolio = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(portfolio.error || "Paper portfolio failed.");
 
+    state.paperKillSwitchActive = portfolio.killSwitchActive === true;
+    state.paperTradingReady = !state.paperKillSwitchActive;
+    const riskStatus = $("paper-risk-status");
+    if (riskStatus) {
+      riskStatus.textContent = state.paperKillSwitchActive
+        ? "KILL SWITCH ACTIVE · paper orders locked"
+        : "Risk gate ready · server-marked · no live execution";
+    }
+
     $("paper-equity").textContent = formatNumber(portfolio.equity, 2);
     $("paper-cash").textContent = formatNumber(portfolio.cash, 2);
     $("paper-realized").textContent = signedNumber(portfolio.realizedPnl, 2);
@@ -518,12 +534,16 @@ async function loadPaperPortfolio(symbol) {
       Array.isArray(portfolio.positions) ? portfolio.positions.length : 0
     );
   } catch {
+    state.paperTradingReady = false;
+    const riskStatus = $("paper-risk-status");
+    if (riskStatus) riskStatus.textContent = "Risk gate unavailable · paper orders locked";
     ["paper-equity", "paper-cash", "paper-realized", "paper-unrealized", "paper-daily", "paper-positions"]
       .forEach((id) => {
         const node = $(id);
         if (node) node.textContent = "—";
       });
   }
+  syncChartControls();
 }
 
 function signedNumber(value, decimals = 2) {
