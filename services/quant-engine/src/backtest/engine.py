@@ -129,7 +129,7 @@ def run_backtest(
     position_pct = min(max(position_pct, 0.0), 100.0)
 
     entry_signals, exit_signals = generate_signals(
-        strategy, open_arr, high, low, close, volume
+        strategy, open_arr, high, low, close, volume, timestamps
     )
 
     fee_rate = config.commission_pct / 100.0
