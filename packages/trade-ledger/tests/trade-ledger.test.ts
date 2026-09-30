@@ -9,6 +9,7 @@ import {
   type ProposedOrder,
 } from "@quant-swarm/risk-contracts";
 import {
+  FileKillSwitchStore,
   JsonlTradeLedger,
   JsonPaperDayStateStore,
   PaperExecutor,
@@ -199,6 +200,21 @@ describe("trade ledger and paper executor", () => {
     ).rejects.toThrow(/cannot sell more/);
 
     expect(await ledger.list()).toEqual([]);
+  });
+
+  it("persists a sticky kill switch across store instances", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const path = join(dir, "paper-kill-switch.json");
+    const first = new FileKillSwitchStore(path);
+    const second = new FileKillSwitchStore(path);
+
+    expect(first.isActive()).toBe(false);
+    first.activate();
+    expect(first.isActive()).toBe(true);
+    expect(second.isActive()).toBe(true);
+
+    const payload = JSON.parse(await readFile(path, "utf8"));
+    expect(payload).toMatchObject({ schemaVersion: 1, active: true });
   });
 
   it("persists one UTC daily loss baseline until the day changes", async () => {
