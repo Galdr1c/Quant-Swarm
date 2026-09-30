@@ -23,7 +23,7 @@ The dashboard never fabricates a live/real marker. A `mode:"live"` point appears
 
 ### Stateful paper portfolio
 
-The native paper account reconstructs its state from the append-only fill ledger. `PaperPortfolio` tracks cash, average entry cost, open long quantities, realized/unrealized PnL, fees, peak equity, drawdown and gross/symbol exposure. `PaperExecutor.executeAgainstPortfolio(...)` derives the exact `PortfolioState` consumed by the sovereign risk engine before settling and persisting a fill.
+The native paper account reconstructs its state from the append-only fill ledger. `PaperPortfolio` tracks cash, average entry cost, open long quantities, realized/unrealized PnL, fees, peak equity, drawdown and gross/symbol exposure. The public paper execution surface is `PaperExecutor.executeFromLedger(...)`: every order rebuilds the current ledger state first, then runs the private portfolio settlement path, projected-risk preview, and persistence in one serialized operation.
 
 The dashboard rebuilds this account using `PAPER_INITIAL_CASH` (default `100000`) and refreshes every open paper position from closed TradingView candles at `PAPER_MARK_TIMEFRAME` before portfolio and risk evaluation. If any required open-position mark cannot be refreshed, paper trading fails closed rather than valuing that position at entry cost.
 
