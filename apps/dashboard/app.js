@@ -428,11 +428,7 @@ async function loadMarketChart() {
     state.priceCandles = Array.isArray(history.candles) ? history.candles : [];
     state.tradeMarkers = Array.isArray(trades.trades) ? trades.trades : [];
     drawPriceChart(state.priceCandles, state.tradeMarkers);
-    const latestPrice = Number(state.priceCandles.at(-1)?.close);
-    await loadPaperPortfolio(
-      symbol,
-      Number.isFinite(latestPrice) && latestPrice > 0 ? latestPrice : undefined
-    );
+    await loadPaperPortfolio(symbol);
     if (version !== marketChartVersion) return;
 
     const paper = state.tradeMarkers.filter((trade) => trade.mode === "paper").length;
@@ -504,9 +500,8 @@ async function placePaperOrder(side) {
   }
 }
 
-async function loadPaperPortfolio(symbol, price) {
+async function loadPaperPortfolio(symbol) {
   const query = new URLSearchParams({ symbol });
-  if (price !== undefined) query.set("price", String(price));
   try {
     const response = await fetch("/api/portfolio?" + query.toString(), { cache: "no-store" });
     const portfolio = await response.json().catch(() => ({}));
