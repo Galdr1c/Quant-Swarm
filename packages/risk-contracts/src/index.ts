@@ -96,6 +96,10 @@ export class RiskEngine {
       return { approved: false, reason: "LIVE_TRADING_DISABLED" };
     }
 
+    if (!(state.symbolExposures instanceof Map)) {
+      return { approved: false, reason: "INVALID_ORDER" };
+    }
+
     const currentSymbolExposure = state.symbolExposures.get(order.symbol) ?? 0;
     const stateNumbers = [
       state.equity,
@@ -198,9 +202,16 @@ export class RiskEngine {
 }
 
 function validateRiskLimits(limits: RiskLimits): void {
-  const entries = Object.entries(limits) as Array<[keyof RiskLimits, number]>;
-  for (const [name, value] of entries) {
-    if (!Number.isFinite(value) || value <= 0) {
+  const names: Array<keyof RiskLimits> = [
+    "maxPortfolioExposurePct",
+    "maxSymbolExposurePct",
+    "maxDailyLossPct",
+    "maxDrawdownPct",
+    "maxLeverage",
+  ];
+  for (const name of names) {
+    const value = limits?.[name];
+    if (!Number.isFinite(value) || Number(value) <= 0) {
       throw new Error(`Risk limit ${name} must be a positive finite number`);
     }
   }
