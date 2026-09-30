@@ -486,6 +486,21 @@ async function placePaperOrder(side) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) {
+      if (result?.killSwitchActive === true) {
+        state.paperKillSwitchActive = true;
+        state.paperTradingReady = false;
+        const riskStatus = $("paper-risk-status");
+        if (riskStatus) {
+          riskStatus.textContent = "KILL SWITCH ACTIVE · paper orders locked";
+        }
+      } else if (response.status === 502) {
+        state.paperTradingReady = false;
+        const riskStatus = $("paper-risk-status");
+        if (riskStatus) {
+          riskStatus.textContent = "Risk marks unavailable · paper orders locked";
+        }
+      }
+      syncChartControls();
       const reason = result?.risk?.reason ? " · " + result.risk.reason : "";
       throw new Error((result.error || "Paper order failed.") + reason);
     }
