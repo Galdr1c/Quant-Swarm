@@ -217,7 +217,11 @@ async function paperOrder(req, res) {
 
   try {
     const response = await serializePaperOrder(async () => {
-      const candles = await marketDataProvider.getHistoricalOHLCV(symbol, timeframe, 50);
+      const candles = await marketDataProvider.getHistoricalOHLCV(
+        symbol,
+        paperMarkTimeframe,
+        50
+      );
       const referenceCandle = candles.at(-1);
       const price = Number(referenceCandle?.close);
       if (!referenceCandle || !Number.isFinite(price) || price <= 0) {
@@ -269,8 +273,9 @@ async function paperOrder(req, res) {
         dailyPnl,
         dailyPnlPct,
         markTimeframe: paperMarkTimeframe,
+        chartTimeframe: timeframe,
         referenceCandle: {
-          timeframe,
+          timeframe: paperMarkTimeframe,
           timestamp: referenceCandle.timestamp,
           close: price
         }
