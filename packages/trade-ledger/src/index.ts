@@ -521,24 +521,6 @@ export class PaperExecutor {
     this.idFactory = options.idFactory ?? randomUUID;
   }
 
-  async execute(
-    order: ProposedOrder,
-    state: PortfolioState,
-    riskEngine: RiskEngine
-  ): Promise<PaperExecutionResult> {
-    if (riskEngine.getMode() !== "paper") {
-      throw new Error("PaperExecutor requires RiskEngine mode=paper");
-    }
-
-    const executionPrice = this.executionPrice(order);
-    const risk = riskEngine.evaluateOrder({ ...order, price: executionPrice }, state);
-    if (!risk.approved) return { risk };
-
-    const fill = this.buildFill(order, executionPrice);
-    await this.ledger.append(fill);
-    return { risk, fill };
-  }
-
   async executeFromLedger(
     order: ProposedOrder,
     initialCash: number,
