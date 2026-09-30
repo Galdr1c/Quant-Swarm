@@ -60,6 +60,10 @@ describe("OpenAIResearchAgent", () => {
       reasoning: { effort: "high" },
     });
     expect(request.text.format.type).toBe("json_schema");
+    expect(request.instructions).toContain("MACD params must include component=line|signal|histogram");
+    expect(request.instructions).toContain("BBANDS params must include component=upper|middle|lower");
+    expect(request.instructions).toContain("VWAP params must include source=close|hlc3|ohlc4");
+    expect(request.instructions).toContain("reset=continuous|utc_day");
   });
 });
 
