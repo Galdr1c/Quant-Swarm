@@ -326,6 +326,7 @@ async function paperPortfolio(url, res) {
       dailyPnl,
       dailyPnlPct: dayStartEquity > 0 ? (dailyPnl / dayStartEquity) * 100 : 0,
       markTimeframe: paperMarkTimeframe,
+      killSwitchActive: paperRiskEngine.isKillSwitchActive(),
       markSymbol: symbol,
       markPrice: symbol ? marks[symbol] ?? null : null
     });
