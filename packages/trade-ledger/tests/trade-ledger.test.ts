@@ -143,6 +143,41 @@ describe("trade ledger and paper executor", () => {
     expect(rebuiltSnapshot.positions[0].quantity).toBeCloseTo(5);
   });
 
+  it("does not let BUY reduceOnly spoof bypass symbol exposure limits", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const ledger = new JsonlTradeLedger(join(dir, "reduce-only-spoof.jsonl"));
+    const executor = new PaperExecutor(ledger, {
+      slippageBps: 0,
+      feeBps: 0,
+      idFactory: () => "spoofed-buy",
+    });
+    const risk = new RiskEngine(
+      {
+        ...DEFAULT_RISK_LIMITS,
+        maxPortfolioExposurePct: 100,
+        maxSymbolExposurePct: 10,
+      },
+      "paper"
+    );
+    const portfolio = new PaperPortfolio(100_000);
+
+    const result = await executor.executeAgainstPortfolio(
+      {
+        ...order(),
+        quantity: 100,
+        price: 200,
+        reduceOnly: true,
+      },
+      portfolio,
+      risk,
+      { "NASDAQ:AAPL": 200 },
+      100_000
+    );
+
+    expect(result.risk).toEqual({ approved: false, reason: "MAX_SYMBOL_EXPOSURE" });
+    expect(await ledger.list()).toEqual([]);
+  });
+
   it("rejects unsettled paper sells before they enter the append-only ledger", async () => {
     const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
     const ledger = new JsonlTradeLedger(join(dir, "portfolio.jsonl"));
