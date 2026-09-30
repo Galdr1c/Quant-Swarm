@@ -238,20 +238,34 @@ export async function rebuildPaperPortfolio(
 }
 
 export class JsonlTradeLedger implements TradeLedger {
+  private appendQueue: Promise<void> = Promise.resolve();
+
   constructor(private readonly filePath: string) {
     if (!filePath.trim()) throw new Error("Trade ledger path cannot be empty");
   }
 
   async append(fill: TradeFill): Promise<"inserted" | "duplicate"> {
     validateTradeFill(fill);
-    const existing = (await this.list()).find((row) => row.id === fill.id);
-    if (existing) {
-      if (canonicalTrade(existing) === canonicalTrade(fill)) return "duplicate";
-      throw new Error(`Conflicting trade fill id already exists: ${fill.id}`);
+
+    let release!: () => void;
+    const previous = this.appendQueue;
+    this.appendQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+
+    try {
+      const existing = (await this.list()).find((row) => row.id === fill.id);
+      if (existing) {
+        if (canonicalTrade(existing) === canonicalTrade(fill)) return "duplicate";
+        throw new Error(`Conflicting trade fill id already exists: ${fill.id}`);
+      }
+      await mkdir(dirname(this.filePath), { recursive: true });
+      await appendFile(this.filePath, JSON.stringify(fill) + "\n", "utf8");
+      return "inserted";
+    } finally {
+      release();
     }
-    await mkdir(dirname(this.filePath), { recursive: true });
-    await appendFile(this.filePath, JSON.stringify(fill) + "\n", "utf8");
-    return "inserted";
   }
 
   async list(symbol?: string): Promise<TradeFill[]> {
