@@ -174,7 +174,12 @@ function renderValidation(row) {
   if (!root) return;
   root.innerHTML = "";
 
-  const checks = row?.checks?.slice(0, 6) || [];
+  const allChecks = Array.isArray(row?.checks) ? row.checks : [];
+  const cvCheck = allChecks.find((check) => check.name === "purged_embargoed_cv");
+  const checks = [
+    ...(cvCheck ? [cvCheck] : []),
+    ...allChecks.filter((check) => check !== cvCheck),
+  ].slice(0, 7);
   if (!checks.length) {
     root.innerHTML =
       '<div class="validation-row"><div><strong>No validation evidence</strong><small>Launch universe research first.</small></div><em class="verdict neutral">—</em></div>';
@@ -299,6 +304,13 @@ function renderDetail(row, index) {
     detail("Candidate", row.candidate?.type || "—") +
     detail("Signal score", formatNumber(row.candidate?.score, 2)) +
     detail("Validation return", formatSignedPercent(validation?.netReturn, 2)) +
+    detail("CV median Sharpe", formatNumber(row.purgedCv?.medianSharpe, 2)) +
+    detail(
+      "Positive CV folds",
+      Number.isFinite(Number(row.purgedCv?.positiveSharpeFraction))
+        ? formatPercent(Number(row.purgedCv.positiveSharpeFraction) * 100, 1)
+        : "—"
+    ) +
     detail("Holdout PF", formatNumber(final?.profitFactor, 2)) +
     detail("Trades", formatInteger(final?.totalTrades || 0)) +
     '</div><div class="detail-note"><strong>' +
