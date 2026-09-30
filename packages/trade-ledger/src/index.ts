@@ -95,6 +95,23 @@ export class JsonPaperDayStateStore {
     } catch (error) {
       throw new Error(`Invalid paper day-state JSON: ${String(error)}`);
     }
+
+    // Backward-compatible migration for day-state files created before peak
+    // equity became persistent. The original day-start equity is the safest
+    // lower-bound historical peak available from that schema.
+    if (
+      value &&
+      typeof value === "object" &&
+      (value as Partial<PaperDayState>).schemaVersion === 1 &&
+      (value as Partial<PaperDayState>).peakEquity === undefined &&
+      Number.isFinite((value as Partial<PaperDayState>).dayStartEquity)
+    ) {
+      value = {
+        ...(value as Record<string, unknown>),
+        peakEquity: Number((value as Partial<PaperDayState>).dayStartEquity),
+      };
+    }
+
     validatePaperDayState(value);
     return value;
   }
