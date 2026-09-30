@@ -174,13 +174,18 @@ describe("trade ledger and paper executor", () => {
     const day2 = Date.UTC(2026, 9, 1, 1, 0, 0);
 
     const first = await store.getOrCreate(100_000, day1);
+    const higher = await store.getOrCreate(106_000, day1 + 4 * 60 * 60 * 1000);
     const sameDay = await store.getOrCreate(94_000, day1 + 8 * 60 * 60 * 1000);
     const nextDay = await store.getOrCreate(94_000, day2);
 
     expect(first.dayStartEquity).toBe(100_000);
+    expect(higher.dayStartEquity).toBe(100_000);
+    expect(higher.peakEquity).toBe(106_000);
     expect(sameDay.dayStartEquity).toBe(100_000);
+    expect(sameDay.peakEquity).toBe(106_000);
     expect(sameDay.utcDate).toBe("2026-09-30");
     expect(nextDay.dayStartEquity).toBe(94_000);
+    expect(nextDay.peakEquity).toBe(106_000);
     expect(nextDay.utcDate).toBe("2026-10-01");
 
     const persisted = JSON.parse(await readFile(path, "utf8"));
@@ -188,7 +193,17 @@ describe("trade ledger and paper executor", () => {
       schemaVersion: 1,
       utcDate: "2026-10-01",
       dayStartEquity: 94_000,
+      peakEquity: 106_000,
     });
+  });
+
+  it("uses persisted historical peak for replayed drawdown risk", () => {
+    const portfolio = new PaperPortfolio(100_000);
+    const riskState = portfolio.toRiskState({}, 100_000, 120_000);
+
+    expect(riskState.equity).toBe(100_000);
+    expect(riskState.peakEquity).toBe(120_000);
+    expect(riskState.drawdownPct).toBeCloseTo(16.6666667);
   });
 
   it("serializes ledger-backed paper executions so concurrent orders see fresh cash", async () => {
