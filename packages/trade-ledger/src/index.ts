@@ -47,15 +47,19 @@ export class FileKillSwitchStore implements KillSwitchStore {
   activate(): void {
     if (this.isActive()) return;
     mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(
-      this.filePath,
-      JSON.stringify({
-        schemaVersion: 1,
-        active: true,
-        activatedAt: Date.now(),
-      }) + "\n",
-      { encoding: "utf8", flag: "wx" }
-    );
+    try {
+      writeFileSync(
+        this.filePath,
+        JSON.stringify({
+          schemaVersion: 1,
+          active: true,
+          activatedAt: Date.now(),
+        }) + "\n",
+        { encoding: "utf8", flag: "wx" }
+      );
+    } catch (error: any) {
+      if (error?.code !== "EEXIST") throw error;
+    }
   }
 }
 
