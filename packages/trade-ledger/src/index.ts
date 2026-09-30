@@ -601,8 +601,10 @@ export class PaperExecutor {
       };
     }
 
-    await this.ledger.append(fill);
-    portfolio.applyFill(fill);
+    const appendResult = await this.ledger.append(fill);
+    if (appendResult === "inserted") {
+      portfolio.applyFill(fill);
+    }
     return {
       risk: projectedRisk,
       fill,
