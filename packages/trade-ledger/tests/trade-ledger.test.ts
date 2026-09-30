@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RISK_LIMITS,
   RiskEngine,
-  type PortfolioState,
   type ProposedOrder,
 } from "@quant-swarm/risk-contracts";
 import {
@@ -18,18 +17,6 @@ import {
   rebuildPaperPortfolio,
   validateTradeFill,
 } from "../src/index.js";
-
-function state(): PortfolioState {
-  return {
-    equity: 100_000,
-    peakEquity: 100_000,
-    dailyPnl: 0,
-    dailyPnlPct: 0,
-    drawdownPct: 0,
-    totalExposurePct: 0,
-    symbolExposures: new Map(),
-  };
-}
 
 function order(): ProposedOrder {
   return {
@@ -55,7 +42,14 @@ describe("trade ledger and paper executor", () => {
     });
     const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
 
-    const result = await executor.execute(order(), state(), risk);
+    const portfolio = new PaperPortfolio(100_000);
+    const result = await executor.executeAgainstPortfolio(
+      order(),
+      portfolio,
+      risk,
+      { "NASDAQ:AAPL": 200 },
+      100_000
+    );
 
     expect(result.risk.approved).toBe(true);
     expect(result.fill).toMatchObject({
@@ -81,7 +75,14 @@ describe("trade ledger and paper executor", () => {
     const executor = new PaperExecutor(ledger, { idFactory: () => "never-used" });
     const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
 
-    const result = await executor.execute(order(), { ...state(), dailyPnlPct: -4 }, risk);
+    const portfolio = new PaperPortfolio(100_000);
+    const result = await executor.executeAgainstPortfolio(
+      order(),
+      portfolio,
+      risk,
+      { "NASDAQ:AAPL": 200 },
+      105_000
+    );
 
     expect(result.risk).toEqual({ approved: false, reason: "DAILY_LOSS_LIMIT" });
     expect(result.fill).toBeUndefined();
