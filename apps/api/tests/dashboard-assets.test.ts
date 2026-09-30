@@ -50,7 +50,7 @@ describe("research dashboard assets", () => {
     expect(html).toContain('id="paper-sell-button"');
     expect(html).toContain('id="paper-daily"');
     expect(html).toContain('id="paper-risk-status"');
-    expect(html).toContain("Server-verifies latest closed TradingView price");
+    expect(html).toContain("Risk gate loading · no live execution");
     expect(html).toContain("Purged CV · PSR · DSR · PBO · FDR · regime robustness");
     expect(html).toContain("universe holdout median Sharpe");
     expect(serverJs).toContain("/api/paper/order");
