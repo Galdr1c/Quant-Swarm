@@ -106,15 +106,26 @@ quant-swarm/
 │  ├─ event-bus/                # Typed in-process event bus
 │  ├─ market-data/              # TradingView provider + synthetic test fixture
 │  ├─ research-ledger/          # JSONL/Postgres research persistence
+│  ├─ trade-ledger/             # Append-only fills + stateful paper portfolio
 │  ├─ risk-contracts/           # AI-independent risk engine
 │  └─ ai-orchestrator/          # Mock/OpenAI/Kimi research agents
 ├─ services/quant-engine/       # FastAPI scanner/backtester/stats/validation
 └─ .github/workflows/ci.yml
 ```
 
+## Strategy DSL indicator semantics
+
+Multi-series indicators have explicit component semantics in new research hypotheses:
+
+- `MACD`: `component` is `line`, `signal`, or `histogram`.
+- `BBANDS`: `component` is `upper`, `middle`, or `lower`.
+- `VWAP`: `source` is `close`, `hlc3`, or `ohlc4`; `reset` is `continuous` or `utc_day`.
+
+The deterministic runner keeps legacy defaults for previously persisted strategies (`MACD=histogram`, `BBANDS=middle`, `VWAP source=close/reset=continuous`), while the AI research prompt requires new strategies to state these choices explicitly. Intraday VWAP hypotheses should normally use `reset=utc_day` unless cumulative behavior is intentionally being tested. Candle timestamps are passed into the runner and must be strictly increasing so session-reset indicators cannot silently use malformed time order.
+
 ## Statistical research
 
-The quant engine includes PSR, DSR, Benjamini-Hochberg FDR, CSCV/PBO, purged + embargoed K-fold planning, deterministic regime robustness, and separate validation/OOS and final-holdout stages.
+The quant engine includes PSR, DSR, Benjamini-Hochberg FDR, CSCV/PBO, real purged + embargoed K-fold test backtests, deterministic regime robustness, and separate validation/OOS and final-holdout stages. Each candidate strategy carries its own fold-level evidence; selection prefers purged-CV median Sharpe and positive-fold fraction before full-slice validation Sharpe.
 
 ```text
 Discovery
@@ -184,7 +195,7 @@ TradingView history
 → ranked universe report
 ```
 
-The report is written to `.data/universe-report.json` by default. Ranking is evidence-first: validation verdict, then final-holdout Sharpe, then final-holdout return. **Positive holdout rate is not a probability of future profit.**
+The report is written to `.data/universe-report.json` by default. Universe ordering uses validation/OOS metrics only: validation Sharpe, then validation return, with deterministic symbol ordering as the final tiebreaker. Final holdout is post-selection evidence and never participates in ranking. **Positive holdout rate is not a probability of future profit.**
 
 ### Research dashboard
 
