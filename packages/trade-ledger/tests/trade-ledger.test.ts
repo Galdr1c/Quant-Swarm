@@ -383,6 +383,45 @@ describe("trade ledger and paper executor", () => {
     expect(await ledger.list("NASDAQ:AAPL")).toHaveLength(1);
   });
 
+  it("does not double-apply an exact duplicate paper fill to portfolio state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const ledger = new JsonlTradeLedger(join(dir, "paper-duplicate.jsonl"));
+    const executor = new PaperExecutor(ledger, {
+      slippageBps: 0,
+      feeBps: 0,
+      now: () => 1_800_000_000_000,
+      idFactory: () => "paper-duplicate",
+    });
+    const risk = new RiskEngine(
+      {
+        ...DEFAULT_RISK_LIMITS,
+        maxPortfolioExposurePct: 100,
+        maxSymbolExposurePct: 100,
+      },
+      "paper"
+    );
+
+    const first = await executor.executeFromLedger(
+      order(),
+      100_000,
+      risk,
+      { "NASDAQ:AAPL": 200 },
+      100_000
+    );
+    const second = await executor.executeFromLedger(
+      order(),
+      100_000,
+      risk,
+      { "NASDAQ:AAPL": 200 },
+      100_000
+    );
+
+    expect(first.portfolio?.positions[0].quantity).toBe(10);
+    expect(second.portfolio?.positions[0].quantity).toBe(10);
+    expect(second.portfolio?.cash).toBeCloseTo(98_000);
+    expect(await ledger.list()).toHaveLength(1);
+  });
+
   it("rejects mismatched live/paper provenance and inconsistent notional", () => {
     expect(() =>
       validateTradeFill({
