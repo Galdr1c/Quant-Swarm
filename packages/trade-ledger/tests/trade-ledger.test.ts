@@ -10,6 +10,7 @@ import {
 } from "@quant-swarm/risk-contracts";
 import {
   JsonlTradeLedger,
+  JsonPaperDayStateStore,
   PaperExecutor,
   PaperPortfolio,
   brokerFill,
@@ -163,6 +164,75 @@ describe("trade ledger and paper executor", () => {
     ).rejects.toThrow(/cannot sell more/);
 
     expect(await ledger.list()).toEqual([]);
+  });
+
+  it("persists one UTC daily loss baseline until the day changes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const path = join(dir, "paper-day.json");
+    const store = new JsonPaperDayStateStore(path);
+    const day1 = Date.UTC(2026, 8, 30, 1, 0, 0);
+    const day2 = Date.UTC(2026, 9, 1, 1, 0, 0);
+
+    const first = await store.getOrCreate(100_000, day1);
+    const sameDay = await store.getOrCreate(94_000, day1 + 8 * 60 * 60 * 1000);
+    const nextDay = await store.getOrCreate(94_000, day2);
+
+    expect(first.dayStartEquity).toBe(100_000);
+    expect(sameDay.dayStartEquity).toBe(100_000);
+    expect(sameDay.utcDate).toBe("2026-09-30");
+    expect(nextDay.dayStartEquity).toBe(94_000);
+    expect(nextDay.utcDate).toBe("2026-10-01");
+
+    const persisted = JSON.parse(await readFile(path, "utf8"));
+    expect(persisted).toMatchObject({
+      schemaVersion: 1,
+      utcDate: "2026-10-01",
+      dayStartEquity: 94_000,
+    });
+  });
+
+  it("serializes ledger-backed paper executions so concurrent orders see fresh cash", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const ledger = new JsonlTradeLedger(join(dir, "concurrent.jsonl"));
+    const ids = ["concurrent-1", "concurrent-2"];
+    const executor = new PaperExecutor(ledger, {
+      slippageBps: 0,
+      feeBps: 0,
+      now: () => 1_800_000_000_000,
+      idFactory: () => ids.shift()!,
+    });
+    const risk = new RiskEngine(
+      {
+        maxPortfolioExposurePct: 200,
+        maxSymbolExposurePct: 200,
+        maxDailyLossPct: 50,
+        maxDrawdownPct: 90,
+        maxLeverage: 3,
+      },
+      "paper"
+    );
+    const large = { ...order(), quantity: 300, price: 200 };
+
+    const settled = await Promise.allSettled([
+      executor.executeFromLedger(
+        large,
+        100_000,
+        risk,
+        { "NASDAQ:AAPL": 200 },
+        100_000
+      ),
+      executor.executeFromLedger(
+        large,
+        100_000,
+        risk,
+        { "NASDAQ:AAPL": 200 },
+        100_000
+      ),
+    ]);
+
+    expect(settled.filter((row) => row.status === "fulfilled")).toHaveLength(1);
+    expect(settled.filter((row) => row.status === "rejected")).toHaveLength(1);
+    expect(await ledger.list("NASDAQ:AAPL")).toHaveLength(1);
   });
 
   it("accepts broker-recorded live fills without providing live execution", async () => {
