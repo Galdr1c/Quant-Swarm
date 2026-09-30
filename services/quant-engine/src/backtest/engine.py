@@ -114,10 +114,14 @@ def run_backtest(
         config = BacktestConfig()
 
     n = len(close)
-    if not (len(open_arr) == len(high) == len(low) == len(volume) == n):
-        raise ValueError("OHLCV arrays must have identical lengths")
+    if not (
+        len(open_arr) == len(high) == len(low) == len(volume) == len(timestamps) == n
+    ):
+        raise ValueError("OHLCV and timestamp arrays must have identical lengths")
     if n == 0:
         raise ValueError("OHLCV arrays must not be empty")
+    if n > 1 and np.any(np.diff(np.asarray(timestamps, dtype=np.int64)) <= 0):
+        raise ValueError("timestamps must be strictly increasing")
     if config.initial_capital <= 0:
         raise ValueError("initial_capital must be positive")
 
