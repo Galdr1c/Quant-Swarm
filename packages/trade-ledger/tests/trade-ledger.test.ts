@@ -16,6 +16,7 @@ import {
   PaperPortfolio,
   brokerFill,
   rebuildPaperPortfolio,
+  validateTradeFill,
 } from "../src/index.js";
 
 function state(): PortfolioState {
@@ -320,6 +321,68 @@ describe("trade ledger and paper executor", () => {
     expect(settled.filter((row) => row.status === "fulfilled")).toHaveLength(1);
     expect(settled.filter((row) => row.status === "rejected")).toHaveLength(1);
     expect(await ledger.list("NASDAQ:AAPL")).toHaveLength(1);
+  });
+
+  it("rejects mismatched live/paper provenance and inconsistent notional", () => {
+    expect(() =>
+      validateTradeFill({
+        schemaVersion: 1,
+        id: "fake-live",
+        symbol: "NASDAQ:AAPL",
+        mode: "live",
+        side: "BUY",
+        timestamp: 1_800_000_000_000,
+        price: 200,
+        quantity: 1,
+        notional: 200,
+        fee: 0,
+        strategyId: "fake",
+        source: "paper-executor",
+      })
+    ).toThrow(/Live trade fill source must be broker/);
+
+    expect(() =>
+      validateTradeFill({
+        schemaVersion: 1,
+        id: "bad-notional",
+        symbol: "NASDAQ:AAPL",
+        mode: "paper",
+        side: "BUY",
+        timestamp: 1_800_000_000_000,
+        price: 200,
+        quantity: 2,
+        notional: 399,
+        fee: 0,
+        strategyId: "bad",
+        source: "paper-executor",
+      })
+    ).toThrow(/notional must equal price/);
+  });
+
+  it("deduplicates broker fills by external execution id", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const ledger = new JsonlTradeLedger(join(dir, "live.jsonl"));
+    const first = brokerFill({
+      id: "live-1",
+      symbol: "BINANCE:BTCUSDT",
+      side: "BUY",
+      timestamp: 1_800_000_000_000,
+      price: 70_000,
+      quantity: 0.01,
+      notional: 700,
+      fee: 0.7,
+      strategyId: "btc-live",
+      externalId: "exchange-fill-1",
+    });
+    const duplicate = { ...first, id: "live-2" };
+
+    expect(await ledger.append(first)).toBe("inserted");
+    expect(await ledger.append(duplicate)).toBe("duplicate");
+    expect(await ledger.list()).toHaveLength(1);
+
+    await expect(
+      ledger.append({ ...duplicate, id: "live-3", price: 70_100, notional: 701 })
+    ).rejects.toThrow(/Conflicting broker externalId/);
   });
 
   it("accepts broker-recorded live fills without providing live execution", async () => {
