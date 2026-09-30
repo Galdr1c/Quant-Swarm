@@ -27,7 +27,9 @@ The native paper account reconstructs its state from the append-only fill ledger
 
 The dashboard rebuilds this account using `PAPER_INITIAL_CASH` (default `100000`) and marks the currently selected symbol at its latest closed TradingView price. Other open symbols fall back to their average entry price until they are selected/marked by an integration.
 
-A paper-only execution endpoint is available at `POST /api/paper/order`. It accepts an exchange-qualified symbol, `BUY`/`SELL`, positive quantity/price and optional `strategyId`. The request is risk-checked at the adverse simulated execution price, settled against the reconstructed paper portfolio, then persisted with `PAPER_SLIPPAGE_BPS` and `PAPER_FEE_BPS`. There is intentionally no equivalent live-order endpoint.
+A paper-only execution endpoint is available at `POST /api/paper/order`. It accepts an exchange-qualified symbol, `BUY`/`SELL`, positive quantity/price and optional `strategyId`. The request is risk-checked at the adverse simulated execution price, settled against a freshly reconstructed paper portfolio, then persisted with `PAPER_SLIPPAGE_BPS` and `PAPER_FEE_BPS`. Ledger-backed executions are serialized so concurrent requests cannot settle against the same stale cash balance. There is intentionally no equivalent live-order endpoint.
+
+Daily-loss checks use a UTC-day baseline persisted at `PAPER_DAY_STATE_PATH` (default `.data/paper-day-state.json`) instead of treating lifetime PnL as daily PnL. The paper `RiskEngine` is also reused for the lifetime of the dashboard process so an activated drawdown kill switch is not forgotten on the next request.
 
 ### Holdout integrity
 
