@@ -267,6 +267,16 @@ async function researchAsset(params: {
       finalHoldout: snapshot(result.finalHoldoutBacktest),
       verdict: result.researchValidation.overallVerdict,
       checks: result.researchValidation.checks,
+      purgedCv: result.evidence.purgedCv
+        ? {
+            evaluatedFolds: result.evidence.purgedCv.evaluatedFolds ?? 0,
+            positiveSharpeFraction:
+              result.evidence.purgedCv.positiveSharpeFraction ?? 0,
+            medianSharpe: result.evidence.purgedCv.medianSharpe ?? 0,
+            meanNetReturn: result.evidence.purgedCv.meanNetReturn ?? 0,
+            worstMaxDrawdown: result.evidence.purgedCv.worstMaxDrawdown ?? 0,
+          }
+        : undefined,
       equityCurve: downsampleSeries(result.finalHoldoutBacktest.equityCurve, 80),
     };
   } catch (error) {
