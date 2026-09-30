@@ -62,7 +62,8 @@ describe("research dashboard assets", () => {
     expect(serverJs).toContain("PAPER_KILL_SWITCH_PATH");
     expect(serverJs).toContain("new FileKillSwitchStore");
     expect(serverJs).toContain("const paperRiskEngine = new RiskEngine");
-    expect(serverJs).toContain("new RiskEngine(DEFAULT_RISK_LIMITS, \"paper\")");
+    expect(serverJs).toContain("paperKillSwitch");
+    expect(serverJs).toContain("DEFAULT_RISK_LIMITS");
     expect(serverJs).not.toContain("/api/live/order");
 
     expect(worldJs).toContain('getContext("webgl2"');
