@@ -51,6 +51,12 @@ const supportedMarketTypes = new Set([
   "economic"
 ]);
 const supportedTimeframes = new Set(["5m", "15m", "1h", "4h", "1d"]);
+const configuredPaperMarkTimeframe =
+  (process.env.PAPER_MARK_TIMEFRAME ?? "5m").trim();
+const paperMarkTimeframe = supportedTimeframes.has(configuredPaperMarkTimeframe)
+  ? configuredPaperMarkTimeframe
+  : "5m";
+let paperOrderQueue = Promise.resolve();
 const marketDataProvider = new TradingViewMarketDataProvider({
   token: process.env.TRADINGVIEW_SESSION_ID,
   signature: process.env.TRADINGVIEW_SESSION_SIGNATURE,
@@ -210,78 +216,75 @@ async function paperOrder(req, res) {
   }
 
   try {
-    const candles = await marketDataProvider.getHistoricalOHLCV(symbol, timeframe, 50);
-    const referenceCandle = candles.at(-1);
-    const price = Number(referenceCandle?.close);
-    if (!referenceCandle || !Number.isFinite(price) || price <= 0) {
-      const error = new Error("TradingView returned no valid closed price for paper execution.");
-      error.statusCode = 502;
-      throw error;
-    }
+    const response = await serializePaperOrder(async () => {
+      const candles = await marketDataProvider.getHistoricalOHLCV(symbol, timeframe, 50);
+      const referenceCandle = candles.at(-1);
+      const price = Number(referenceCandle?.close);
+      if (!referenceCandle || !Number.isFinite(price) || price <= 0) {
+        throw paperMarketDataError(
+          "TradingView returned no valid closed price for paper execution."
+        );
+      }
 
-    const marks = { [symbol]: price };
-    const currentPortfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
-    const currentSnapshot = currentPortfolio.snapshot(marks);
-    const dayState = await paperDayState.getOrCreate(currentSnapshot.equity);
-    const order = {
-      symbol,
-      side,
-      quantity,
-      price,
-      leverage: 1,
-      strategyId,
-      reduceOnly:
-        typeof payload?.reduceOnly === "boolean"
-          ? payload.reduceOnly
-          : side === "SELL"
-    };
-    const result = await paperExecutor.executeFromLedger(
-      order,
-      paperInitialCash,
-      paperRiskEngine,
-      marks,
-      dayState.dayStartEquity,
-      dayState.peakEquity
-    );
+      const currentPortfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
+      const marks = await loadOpenPositionMarks(currentPortfolio, {
+        [symbol]: price
+      });
+      const currentSnapshot = currentPortfolio.snapshot(marks);
+      const dayState = await paperDayState.getOrCreate(currentSnapshot.equity);
+      const order = {
+        symbol,
+        side,
+        quantity,
+        price,
+        leverage: 1,
+        strategyId,
+        reduceOnly:
+          typeof payload?.reduceOnly === "boolean"
+            ? payload.reduceOnly
+            : side === "SELL"
+      };
+      const result = await paperExecutor.executeFromLedger(
+        order,
+        paperInitialCash,
+        paperRiskEngine,
+        marks,
+        dayState.dayStartEquity,
+        dayState.peakEquity
+      );
 
-    const portfolio = result.portfolio;
-    const updatedDayState = portfolio
-      ? await paperDayState.getOrCreate(portfolio.equity)
-      : dayState;
-    const dailyPnl = portfolio
-      ? portfolio.equity - dayState.dayStartEquity
-      : currentSnapshot.equity - dayState.dayStartEquity;
-    const dailyPnlPct = (dailyPnl / dayState.dayStartEquity) * 100;
-
-    if (!result.risk.approved) {
-      return sendJson(res, 409, {
-        error: "Paper order rejected by risk engine.",
+      const portfolio = result.portfolio;
+      const updatedDayState = portfolio
+        ? await paperDayState.getOrCreate(portfolio.equity)
+        : dayState;
+      const dailyPnl = portfolio
+        ? portfolio.equity - dayState.dayStartEquity
+        : currentSnapshot.equity - dayState.dayStartEquity;
+      const dailyPnlPct = (dailyPnl / dayState.dayStartEquity) * 100;
+      const body = {
+        ...(result.fill ? { fill: result.fill } : {}),
         risk: result.risk,
         portfolio,
         dayState: updatedDayState,
         dailyPnl,
         dailyPnlPct,
+        markTimeframe: paperMarkTimeframe,
         referenceCandle: {
           timeframe,
           timestamp: referenceCandle.timestamp,
           close: price
         }
-      });
-    }
+      };
 
-    return sendJson(res, 201, {
-      fill: result.fill,
-      risk: result.risk,
-      portfolio,
-      dayState: updatedDayState,
-      dailyPnl,
-      dailyPnlPct,
-      referenceCandle: {
-        timeframe,
-        timestamp: referenceCandle.timestamp,
-        close: price
-      }
+      return {
+        status: result.risk.approved ? 201 : 409,
+        body: result.risk.approved
+          ? body
+          : { error: "Paper order rejected by risk engine.", ...body }
+      };
     });
+
+    return sendJson(res, response.status, response.body);
   } catch (error) {
     const status = error?.statusCode === 502 ? 502 : 400;
     return sendJson(res, status, {
@@ -292,14 +295,10 @@ async function paperOrder(req, res) {
 
 async function paperPortfolio(url, res) {
   const symbol = normalizeSearchResultId(url.searchParams.get("symbol"));
-  const rawPrice = Number(url.searchParams.get("price"));
-  const marks =
-    symbol && Number.isFinite(rawPrice) && rawPrice > 0
-      ? { [symbol]: rawPrice }
-      : {};
 
   try {
     const portfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
+    const marks = await loadOpenPositionMarks(portfolio);
     const rawSnapshot = portfolio.snapshot(marks);
     const dayState = await paperDayState.getOrCreate(rawSnapshot.equity);
     const snapshot = portfolio.snapshot(marks, dayState.peakEquity);
@@ -311,14 +310,69 @@ async function paperPortfolio(url, res) {
       dayStartEquity,
       dailyPnl,
       dailyPnlPct: dayStartEquity > 0 ? (dailyPnl / dayStartEquity) * 100 : 0,
+      markTimeframe: paperMarkTimeframe,
       markSymbol: symbol,
       markPrice: symbol ? marks[symbol] ?? null : null
     });
   } catch (error) {
-    return sendJson(res, 500, {
+    const status = error?.statusCode === 502 ? 502 : 500;
+    return sendJson(res, status, {
       error: errorMessage(error, "Could not rebuild paper portfolio.")
     });
   }
+}
+
+async function loadOpenPositionMarks(portfolio, overrides = {}) {
+  const positions = portfolio.snapshot().positions;
+  const marks = { ...overrides };
+  const missingSymbols = positions
+    .map((position) => position.symbol)
+    .filter((symbol) => !Number.isFinite(Number(marks[symbol])));
+
+  await Promise.all(
+    missingSymbols.map(async (symbol) => {
+      try {
+        const candles = await marketDataProvider.getHistoricalOHLCV(
+          symbol,
+          paperMarkTimeframe,
+          50
+        );
+        const latest = candles.at(-1);
+        const price = Number(latest?.close);
+        if (!latest || !Number.isFinite(price) || price <= 0) {
+          throw new Error("no valid closed candle");
+        }
+        marks[symbol] = price;
+      } catch (error) {
+        throw paperMarketDataError(
+          "Could not mark open paper position " + symbol + ": " +
+          errorMessage(error, "TradingView mark failed.")
+        );
+      }
+    })
+  );
+
+  return marks;
+}
+
+async function serializePaperOrder(task) {
+  let release;
+  const previous = paperOrderQueue;
+  paperOrderQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
+
+function paperMarketDataError(message) {
+  const error = new Error(message);
+  error.statusCode = 502;
+  return error;
 }
 
 async function recordedTrades(url, res) {
