@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
+  KillSwitchStore,
   PortfolioState,
   ProposedOrder,
   RiskDecision,
@@ -31,6 +33,30 @@ export interface TradeFill {
 export interface TradeLedger {
   append(fill: TradeFill): Promise<"inserted" | "duplicate">;
   list(symbol?: string): Promise<TradeFill[]>;
+}
+
+export class FileKillSwitchStore implements KillSwitchStore {
+  constructor(private readonly filePath: string) {
+    if (!filePath.trim()) throw new Error("Kill-switch path cannot be empty");
+  }
+
+  isActive(): boolean {
+    return existsSync(this.filePath);
+  }
+
+  activate(): void {
+    if (this.isActive()) return;
+    mkdirSync(dirname(this.filePath), { recursive: true });
+    writeFileSync(
+      this.filePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        active: true,
+        activatedAt: Date.now(),
+      }) + "\n",
+      { encoding: "utf8", flag: "wx" }
+    );
+  }
 }
 
 export interface PaperDayState {
