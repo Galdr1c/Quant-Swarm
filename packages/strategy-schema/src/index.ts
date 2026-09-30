@@ -187,12 +187,53 @@ export function validateStrategy(input: unknown): ValidationResult {
           `indicator "${ind.id}": MACD fastLength must be less than slowLength`
         );
       }
+      const component = ind.params.component;
+      if (
+        component !== undefined &&
+        (typeof component !== "string" ||
+          !["line", "signal", "histogram"].includes(component.toLowerCase()))
+      ) {
+        semanticErrors.push(
+          `indicator "${ind.id}": MACD component must be line, signal, or histogram`
+        );
+      }
     } else if (ind.type === "SUPERTREND") {
       positive("factor");
       integerAtLeast("atrLength", 2);
     } else if (ind.type === "BBANDS") {
       integerAtLeast("length", 2);
       positive("stddev");
+      const component = ind.params.component;
+      if (
+        component !== undefined &&
+        (typeof component !== "string" ||
+          !["upper", "middle", "lower"].includes(component.toLowerCase()))
+      ) {
+        semanticErrors.push(
+          `indicator "${ind.id}": BBANDS component must be upper, middle, or lower`
+        );
+      }
+    } else if (ind.type === "VWAP") {
+      const source = ind.params.source;
+      if (
+        source !== undefined &&
+        (typeof source !== "string" ||
+          !["close", "hlc3", "ohlc4"].includes(source.toLowerCase()))
+      ) {
+        semanticErrors.push(
+          `indicator "${ind.id}": VWAP source must be close, hlc3, or ohlc4`
+        );
+      }
+      const reset = ind.params.reset;
+      if (
+        reset !== undefined &&
+        (typeof reset !== "string" ||
+          !["continuous", "utc_day"].includes(reset.toLowerCase()))
+      ) {
+        semanticErrors.push(
+          `indicator "${ind.id}": VWAP reset must be continuous or utc_day`
+        );
+      }
     }
   }
 
