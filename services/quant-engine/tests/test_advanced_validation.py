@@ -127,7 +127,7 @@ def test_research_validation_marks_missing_evidence_for_review():
             "probability_of_backtest_overfitting",
             "multiple_testing_fdr",
             "regime_robustness",
-            "purged_embargoed_cv_plan",
+            "purged_embargoed_cv",
         }
     }
     assert set(advanced.values()) == {"REVIEW"}
@@ -154,6 +154,26 @@ def test_research_validation_can_pass_with_complete_evidence():
             "nSplits": 5,
             "purgeBars": 2,
             "embargoBars": 2,
+            "evaluatedFolds": 5,
+            "positiveSharpeFraction": 0.8,
+            "medianSharpe": 0.5,
+            "meanNetReturn": 0.8,
+            "worstMaxDrawdown": 6.0,
+            "folds": [
+                {
+                    "fold": index + 1,
+                    "trainObservations": 76,
+                    "testObservations": 20,
+                    "testStartTimestamp": 1_000 + index * 20,
+                    "testEndTimestamp": 1_019 + index * 20,
+                    "sharpe": -0.1 if index == 4 else 0.5 + index * 0.1,
+                    "netReturn": -0.2 if index == 4 else 1.0,
+                    "maxDrawdown": 6.0,
+                    "totalTrades": 8,
+                    "annualization": 365.25,
+                }
+                for index in range(5)
+            ],
         },
     }
     report = validate_research(

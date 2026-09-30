@@ -107,8 +107,17 @@ export function validateStrategy(input: unknown): ValidationResult {
   const strategy = parsed.data;
   const semanticErrors: string[] = [];
 
+  // Semantic: indicator ids must be unique; otherwise the quant runner would overwrite
+  // one computed series with another under the same key.
+  const indicatorIds = new Set<string>();
+  for (const ind of strategy.indicators) {
+    if (indicatorIds.has(ind.id)) {
+      semanticErrors.push(`indicator id "${ind.id}" is duplicated`);
+    }
+    indicatorIds.add(ind.id);
+  }
+
   // Semantic: all rule references must point to defined indicators or numeric values
-  const indicatorIds = new Set(strategy.indicators.map((ind) => ind.id));
 
   const checkRuleRefs = (group: RuleGroup, context: string) => {
     for (const rule of group.rules) {
@@ -139,19 +148,90 @@ export function validateStrategy(input: unknown): ValidationResult {
     );
   }
 
-  // Semantic: indicator params should have at least "length" or type-specific params
+  // Semantic: reject parameters that would make the deterministic indicator
+  // implementation undefined or misleading. Missing params may still use the
+  // quant engine's documented defaults.
   for (const ind of strategy.indicators) {
-    if (ind.type === "MACD") {
-      // MACD needs fastLength, slowLength, signalLength
-      if (!("fastLength" in ind.params) && !("length" in ind.params)) {
+    const numeric = (name: string): number | undefined => {
+      const value = ind.params[name];
+      return typeof value === "number" ? value : undefined;
+    };
+    const integerAtLeast = (name: string, minimum: number) => {
+      const value = numeric(name);
+      if (value !== undefined && (!Number.isInteger(value) || value < minimum)) {
         semanticErrors.push(
-          `indicator "${ind.id}": MACD should have fastLength/slowLength/signalLength or length`
+          `indicator "${ind.id}": ${name} must be an integer >= ${minimum}`
+        );
+      }
+    };
+    const positive = (name: string) => {
+      const value = numeric(name);
+      if (value !== undefined && (!Number.isFinite(value) || value <= 0)) {
+        semanticErrors.push(
+          `indicator "${ind.id}": ${name} must be > 0`
+        );
+      }
+    };
+
+    if (ind.type === "EMA" || ind.type === "SMA" || ind.type === "RSI" || ind.type === "ATR") {
+      integerAtLeast("length", 2);
+    } else if (ind.type === "MACD") {
+      integerAtLeast("length", 2);
+      integerAtLeast("fastLength", 2);
+      integerAtLeast("slowLength", 2);
+      integerAtLeast("signalLength", 2);
+      const fast = numeric("fastLength") ?? numeric("length") ?? 12;
+      const slow = numeric("slowLength") ?? 26;
+      if (Number.isFinite(fast) && Number.isFinite(slow) && fast >= slow) {
+        semanticErrors.push(
+          `indicator "${ind.id}": MACD fastLength must be less than slowLength`
+        );
+      }
+      const component = ind.params.component;
+      if (
+        component !== undefined &&
+        (typeof component !== "string" ||
+          !["line", "signal", "histogram"].includes(component.toLowerCase()))
+      ) {
+        semanticErrors.push(
+          `indicator "${ind.id}": MACD component must be line, signal, or histogram`
         );
       }
     } else if (ind.type === "SUPERTREND") {
-      if (!("factor" in ind.params) && !("atrLength" in ind.params)) {
+      positive("factor");
+      integerAtLeast("atrLength", 2);
+    } else if (ind.type === "BBANDS") {
+      integerAtLeast("length", 2);
+      positive("stddev");
+      const component = ind.params.component;
+      if (
+        component !== undefined &&
+        (typeof component !== "string" ||
+          !["upper", "middle", "lower"].includes(component.toLowerCase()))
+      ) {
         semanticErrors.push(
-          `indicator "${ind.id}": SUPERTREND should have factor and atrLength`
+          `indicator "${ind.id}": BBANDS component must be upper, middle, or lower`
+        );
+      }
+    } else if (ind.type === "VWAP") {
+      const source = ind.params.source;
+      if (
+        source !== undefined &&
+        (typeof source !== "string" ||
+          !["close", "hlc3", "ohlc4"].includes(source.toLowerCase()))
+      ) {
+        semanticErrors.push(
+          `indicator "${ind.id}": VWAP source must be close, hlc3, or ohlc4`
+        );
+      }
+      const reset = ind.params.reset;
+      if (
+        reset !== undefined &&
+        (typeof reset !== "string" ||
+          !["continuous", "utc_day"].includes(reset.toLowerCase()))
+      ) {
+        semanticErrors.push(
+          `indicator "${ind.id}": VWAP reset must be continuous or utc_day`
         );
       }
     }

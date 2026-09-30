@@ -80,6 +80,7 @@ export class RiskEngine {
     liveTradingEnabled = false,
     killSwitchStore: KillSwitchStore = new InMemoryKillSwitchStore()
   ) {
+    validateRiskLimits(limits);
     this.limits = Object.freeze({ ...limits });
     this.mode = mode;
     this.liveTradingEnabled = liveTradingEnabled;
@@ -95,15 +96,46 @@ export class RiskEngine {
       return { approved: false, reason: "LIVE_TRADING_DISABLED" };
     }
 
+    if (!(state.symbolExposures instanceof Map)) {
+      return { approved: false, reason: "INVALID_ORDER" };
+    }
+
+    const currentSymbolExposure = state.symbolExposures.get(order.symbol) ?? 0;
+    const stateNumbers = [
+      state.equity,
+      state.peakEquity,
+      state.dailyPnl,
+      state.dailyPnlPct,
+      state.drawdownPct,
+      state.totalExposurePct,
+      currentSymbolExposure,
+    ];
+    const invalidExposure = [...state.symbolExposures.entries()].some(
+      ([symbol, exposure]) =>
+        typeof symbol !== "string" ||
+        !symbol.trim() ||
+        !Number.isFinite(exposure) ||
+        exposure < 0
+    );
+
     if (
-      !Number.isFinite(state.equity) ||
+      typeof order.symbol !== "string" ||
+      !order.symbol.trim() ||
+      typeof order.strategyId !== "string" ||
+      !order.strategyId.trim() ||
+      stateNumbers.some((value) => !Number.isFinite(value)) ||
       state.equity <= 0 ||
+      state.peakEquity <= 0 ||
+      state.drawdownPct < 0 ||
+      state.totalExposurePct < 0 ||
+      currentSymbolExposure < 0 ||
+      invalidExposure ||
       !Number.isFinite(order.quantity) ||
       !Number.isFinite(order.price) ||
       !Number.isFinite(order.leverage) ||
       order.quantity <= 0 ||
       order.price <= 0 ||
-      order.leverage < 0
+      order.leverage <= 0
     ) {
       return { approved: false, reason: "INVALID_ORDER" };
     }
@@ -122,7 +154,6 @@ export class RiskEngine {
     }
 
     const orderExposurePct = ((order.quantity * order.price) / state.equity) * 100;
-    const currentSymbolExposure = state.symbolExposures.get(order.symbol) ?? 0;
 
     let projectedPortfolioExposurePct: number;
     let projectedSymbolExposurePct: number;
@@ -167,6 +198,22 @@ export class RiskEngine {
 
   getLimits(): Readonly<RiskLimits> {
     return this.limits;
+  }
+}
+
+function validateRiskLimits(limits: RiskLimits): void {
+  const names: Array<keyof RiskLimits> = [
+    "maxPortfolioExposurePct",
+    "maxSymbolExposurePct",
+    "maxDailyLossPct",
+    "maxDrawdownPct",
+    "maxLeverage",
+  ];
+  for (const name of names) {
+    const value = limits?.[name];
+    if (!Number.isFinite(value) || Number(value) <= 0) {
+      throw new Error(`Risk limit ${name} must be a positive finite number`);
+    }
   }
 }
 

@@ -66,12 +66,16 @@ function candles(start: number): OHLCV[] {
 }
 
 class FakeQuantClient implements ResearchQuantClient {
-  readonly validationSharpes: Record<string, number> = { s1: 0.8, s2: 1.5, s3: 1.1 };
+  readonly validationSharpes: Record<string, number> = { s1: 2.0, s2: 1.5, s3: 1.1 };
   finalStrategyId?: string;
   evidenceSeen?: unknown;
   calibrationCandlesSeen?: OHLCV[];
 
-  async backtest(input: StrategyDefinition, rows: OHLCV[]): Promise<BacktestWithEquity> {
+  async backtest(
+    input: StrategyDefinition,
+    rows: OHLCV[],
+    annualization?: number
+  ): Promise<BacktestWithEquity> {
     const isFinal = rows[0].timestamp >= 2_000_000;
     if (isFinal) this.finalStrategyId = input.id;
     const sharpe = isFinal ? 0.7 : this.validationSharpes[input.id];
@@ -85,6 +89,7 @@ class FakeQuantClient implements ResearchQuantClient {
       strategyId: input.id,
       netReturn: sharpe * 2,
       annualReturn: sharpe * 3,
+      annualization: annualization ?? 365.25 * 24 * 60,
       sharpe,
       sortino: sharpe + 0.2,
       maxDrawdown: 5,
@@ -150,6 +155,43 @@ class FakeQuantClient implements ResearchQuantClient {
     };
   }
 
+  async purgedCv(
+    strategy: StrategyDefinition,
+    rows: OHLCV[],
+    options: { nSplits: number; purgeBars: number; embargoBars: number }
+  ) {
+    const foldSize = Math.floor(rows.length / options.nSplits);
+    const baseSharpe = strategy.id === "s2" ? 0.8 : strategy.id === "s3" ? 0.5 : 0.1;
+    const folds = Array.from({ length: options.nSplits }, (_, index) => {
+      const start = index * foldSize;
+      const end = index === options.nSplits - 1 ? rows.length : (index + 1) * foldSize;
+      return {
+        fold: index + 1,
+        trainObservations: rows.length - (end - start),
+        testObservations: end - start,
+        testStartTimestamp: rows[start].timestamp,
+        testEndTimestamp: rows[end - 1].timestamp,
+        sharpe: index === options.nSplits - 1 ? baseSharpe - 0.2 : baseSharpe + index * 0.02,
+        netReturn: index === options.nSplits - 1 ? -0.2 : baseSharpe,
+        maxDrawdown: 4,
+        totalTrades: 8,
+        annualization: 365.25 * 24 * 60,
+      };
+    });
+    return {
+      nObservations: rows.length,
+      nSplits: options.nSplits,
+      purgeBars: options.purgeBars,
+      embargoBars: options.embargoBars,
+      evaluatedFolds: folds.length,
+      positiveSharpeFraction: folds.filter((fold) => fold.sharpe > 0).length / folds.length,
+      medianSharpe: baseSharpe,
+      meanNetReturn: baseSharpe,
+      worstMaxDrawdown: 4,
+      folds,
+    };
+  }
+
   async validateResearch(
     _result: BacktestWithEquity,
     evidence: any
@@ -186,7 +228,6 @@ function searchParams(ledger: MemoryResearchLedger, quant: ResearchQuantClient, 
       quant,
       options: {
         runId,
-        annualization: 365.25 * 24 * 4,
         coordinator: { maxConcurrency: 2, timeoutMs: 1000 },
       },
     },
@@ -204,6 +245,8 @@ describe("runResearchSearch", () => {
     expect(quant.calibrationCandlesSeen?.[0].timestamp).toBe(calibration[0].timestamp);
     expect(result.regimeCalibration.lookback).toBe(5);
     expect(result.selectedStrategy.id).toBe("s2");
+    // s1 has the strongest full-slice Sharpe (2.0), but s2 wins because its
+    // fold-level median Sharpe is more robust.
     expect(result.validationBacktest.sharpe).toBe(1.5);
     expect(quant.finalStrategyId).toBe("s2");
     expect(result.finalHoldoutBacktest.sharpe).toBe(0.7);
@@ -215,19 +258,70 @@ describe("runResearchSearch", () => {
     expect(records.every((row) => Object.keys(row.metrics.regimeReturns ?? {}).length === 3)).toBe(true);
     expect(records.every((row) => row.strategySnapshot?.id === row.strategyId)).toBe(true);
     expect(records.every((row) => /^[a-f0-9]{64}$/.test(row.strategyFingerprint ?? ""))).toBe(true);
+    expect(records.every((row) => row.tags?.includes(`holdout:${result.datasetIdentity.holdoutFingerprint}`))).toBe(true);
+    expect(result.datasetIdentity.datasetFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.datasetIdentity.holdoutFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.datasetIdentity.finalHoldout.observations).toBe(40);
 
     const run = await ledger.getRun("run-test");
     expect(run?.status).toBe("COMPLETED");
     expect(run?.selectedTrialId).toBe(result.selectedTrialId);
+    expect(run?.evidence?.datasetFingerprint).toBe(result.datasetIdentity.datasetFingerprint);
+    expect(run?.evidence?.holdoutFingerprint).toBe(result.datasetIdentity.holdoutFingerprint);
+    expect(run?.evidence?.researchValidation.overallVerdict).toBe("PASS");
 
     expect(result.evidence.trialSharpes).toHaveLength(3);
+    expect(result.evidence.annualization).toBe(365.25 * 24 * 60);
     expect(result.evidence.candidatePValues).toHaveLength(3);
     expect(result.evidence.cscvReturns?.[0]).toHaveLength(3);
     expect(Object.keys(result.evidence.regimeReturns ?? {})).toEqual(["trending", "ranging", "volatile"]);
     expect(result.evidence.purgedCv?.nObservations).toBe(validation.length);
+    expect(result.evidence.purgedCv?.evaluatedFolds).toBe(5);
+    expect(result.evidence.purgedCv?.folds).toHaveLength(5);
     expect(result.researchValidation.overallVerdict).toBe("PASS");
 
     await expect(runResearchSearch(params)).rejects.toThrow(/already exists/);
+  });
+
+  it("rejects a different run that tries to consume the identical final holdout", async () => {
+    const ledger = new MemoryResearchLedger();
+    const firstQuant = new FakeQuantClient();
+    const first = searchParams(ledger, firstQuant, "run-holdout-first");
+    await runResearchSearch(first.params);
+
+    const secondQuant = new FakeQuantClient();
+    const second = searchParams(ledger, secondQuant, "run-holdout-second");
+    await expect(runResearchSearch(second.params)).rejects.toThrow(/Final holdout has already been consumed/);
+
+    const run = await ledger.getRun("run-holdout-second");
+    expect(run?.status).toBe("FAILED");
+  });
+
+  it("allows explicit controlled holdout reuse when the escape hatch is set", async () => {
+    const ledger = new MemoryResearchLedger();
+    const first = searchParams(ledger, new FakeQuantClient(), "run-reuse-first");
+    await runResearchSearch(first.params);
+
+    const second = searchParams(ledger, new FakeQuantClient(), "run-reuse-second");
+    second.params.options.allowIdenticalHoldoutReuse = true;
+    const result = await runResearchSearch(second.params);
+
+    expect(result.runId).toBe("run-reuse-second");
+  });
+
+  it("rejects hypotheses that target a different market or timeframe", async () => {
+    const ledger = new MemoryResearchLedger();
+    const quant = new FakeQuantClient();
+    const { params } = searchParams(ledger, quant, "run-target-mismatch");
+    const mismatchedContext: ResearchContext = {
+      ...params.context,
+      targetMarket: { symbol: "NASDAQ:NVDA", timeframe: "1h" },
+    };
+    params.context = mismatchedContext;
+
+    await expect(runResearchSearch(params)).rejects.toThrow(/0 successful trials/);
+    const run = await ledger.getRun("run-target-mismatch");
+    expect(run?.status).toBe("FAILED");
   });
 
   it("marks a claimed run FAILED when deterministic research infrastructure errors", async () => {

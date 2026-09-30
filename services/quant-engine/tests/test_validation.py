@@ -1,4 +1,4 @@
-from src.api.server import PsrRequest, psr
+from src.api.server import Candle, PsrRequest, PurgedCvRequest, psr, purged_cv
 from src.validation.validator import validate_backtest
 
 
@@ -56,3 +56,48 @@ def test_psr_endpoint_returns_one_sided_p_value_from_equity_curve():
     assert 0.0 <= result["pValue"] <= 1.0
     assert abs(result["pValue"] - (1.0 - result["probability"])) < 1e-7
     assert result["sharpe"] > 0
+
+
+def test_purged_cv_endpoint_runs_each_deterministic_test_fold():
+    strategy = {
+        "id": "cv-strategy",
+        "name": "CV strategy",
+        "market": {"symbol": "TEST:ABC", "timeframe": "1h"},
+        "indicators": [{"id": "ema", "type": "EMA", "params": {"length": 3}}],
+        "entry": {
+            "operator": "AND",
+            "rules": [{"left": "ema", "operator": "<", "right": 1_000_000}],
+        },
+        "exit": {
+            "operator": "OR",
+            "rules": [{"left": "ema", "operator": ">", "right": 1_000_001}],
+        },
+        "risk": {"stopLossPct": 2, "takeProfitPct": 4, "maxPositionPct": 5},
+    }
+    candles = [
+        Candle(
+            timestamp=1_700_000_000_000 + index * 3_600_000,
+            open=100 + index * 0.1,
+            high=101 + index * 0.1,
+            low=99 + index * 0.1,
+            close=100.5 + index * 0.1,
+            volume=1_000 + index,
+        )
+        for index in range(60)
+    ]
+
+    result = purged_cv(
+        PurgedCvRequest(
+            strategy=strategy,
+            candles=candles,
+            nSplits=5,
+            purgeBars=2,
+            embargoBars=1,
+        )
+    )
+
+    assert result["evaluatedFolds"] == 5
+    assert len(result["folds"]) == 5
+    assert all(fold["testObservations"] == 12 for fold in result["folds"])
+    assert all(fold["trainObservations"] < 48 for fold in result["folds"])
+    assert 0.0 <= result["positiveSharpeFraction"] <= 1.0

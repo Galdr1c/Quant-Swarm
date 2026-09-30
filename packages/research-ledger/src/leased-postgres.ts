@@ -5,6 +5,7 @@ import {
   validateRecord,
   validateRunRecord,
   type ResearchAppendResult,
+  type ResearchRunEvidence,
   type ResearchRunFinish,
   type ResearchRunRecord,
   type ResearchTrialRecord,
@@ -107,7 +108,8 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
              lease_generation = existing.lease_generation + 1,
              lease_expires_at_ms = EXCLUDED.lease_expires_at_ms,
              selected_trial_id = NULL,
-             error = NULL
+             error = NULL,
+             evidence = NULL
        WHERE existing.status = 'RUNNING'
          AND (existing.lease_expires_at_ms IS NULL
               OR existing.lease_expires_at_ms <= EXCLUDED.updated_at_ms)
@@ -175,6 +177,7 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
               updated_at_ms = $6,
               selected_trial_id = $7,
               error = $8,
+              evidence = $9::jsonb,
               lease_token = NULL,
               lease_expires_at_ms = NULL
         WHERE run_id = $1
@@ -193,6 +196,7 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
         finish.updatedAt,
         finish.selectedTrialId ?? null,
         finish.error ?? null,
+        finish.evidence ? JSON.stringify(finish.evidence) : null,
       ]
     );
     if (result.rowCount === 1) return;
@@ -290,7 +294,7 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
     validateRunId(runId);
     await this.ready;
     const result = await this.pool.query(
-      `SELECT run_id, created_at_ms, updated_at_ms, status, selected_trial_id, error
+      `SELECT run_id, created_at_ms, updated_at_ms, status, selected_trial_id, error, evidence
          FROM ${this.table("research_runs")}
         WHERE run_id = $1`,
       [runId]
@@ -305,6 +309,9 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
       status: row.status,
       ...(row.selected_trial_id ? { selectedTrialId: String(row.selected_trial_id) } : {}),
       ...(row.error ? { error: String(row.error) } : {}),
+      ...(row.evidence ? {
+        evidence: (typeof row.evidence === "string" ? JSON.parse(row.evidence) : row.evidence) as ResearchRunEvidence,
+      } : {}),
     };
     validateRunRecord(record);
     return record;
@@ -353,6 +360,7 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
           status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
           selected_trial_id TEXT,
           error TEXT,
+          evidence JSONB,
           lease_owner TEXT,
           lease_token TEXT,
           lease_generation BIGINT NOT NULL DEFAULT 0,
@@ -361,6 +369,7 @@ export class LeasedPostgresResearchLedger implements LeaseCapableResearchLedger 
       );
       await client.query(
         `ALTER TABLE ${this.table("research_runs")}
+           ADD COLUMN IF NOT EXISTS evidence JSONB,
            ADD COLUMN IF NOT EXISTS lease_owner TEXT,
            ADD COLUMN IF NOT EXISTS lease_token TEXT,
            ADD COLUMN IF NOT EXISTS lease_generation BIGINT NOT NULL DEFAULT 0,
@@ -442,13 +451,27 @@ function validateFinish(finish: ResearchRunFinish): void {
   if (finish.error !== undefined && typeof finish.error !== "string") {
     throw new Error("finishRun error must be a string");
   }
+  if (finish.evidence !== undefined) {
+    // Shared ledger validation performs the detailed evidence-shape checks.
+    validateRunRecord({
+      schemaVersion: 1,
+      runId: "evidence-validation",
+      createdAt: 1,
+      updatedAt: 1,
+      status: finish.status,
+      ...(finish.selectedTrialId ? { selectedTrialId: finish.selectedTrialId } : {}),
+      ...(finish.error ? { error: finish.error } : {}),
+      evidence: finish.evidence,
+    });
+  }
 }
 
 function terminalRunMatches(current: ResearchRunRecord, finish: ResearchRunFinish): boolean {
   return current.status === finish.status
     && current.updatedAt === finish.updatedAt
     && (current.selectedTrialId ?? undefined) === (finish.selectedTrialId ?? undefined)
-    && (current.error ?? undefined) === (finish.error ?? undefined);
+    && (current.error ?? undefined) === (finish.error ?? undefined)
+    && canonicalJson(current.evidence ?? null) === canonicalJson(finish.evidence ?? null);
 }
 
 function recordHash(record: ResearchTrialRecord): string {

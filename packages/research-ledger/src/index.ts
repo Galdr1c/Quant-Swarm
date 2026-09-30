@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { Pool, type PoolConfig } from "pg";
-import type { CandidateEvent, ValidationVerdict } from "@quant-swarm/shared";
+import type {
+  CandidateEvent,
+  ValidationCheck,
+  ValidationVerdict,
+} from "@quant-swarm/shared";
 import {
   validateStrategy,
   type StrategyDefinition,
@@ -19,6 +23,8 @@ export interface ResearchTrialMetrics {
   outOfSampleReturns?: number[];
   /** Strategy returns grouped by deterministic market regime. */
   regimeReturns?: Record<string, number[]>;
+  /** Deterministic purged/embargoed fold evaluation for this strategy trial. */
+  purgedCv?: PurgedCvEvidence;
 }
 
 export interface ResearchTrialProvenance {
@@ -49,6 +55,33 @@ export interface ResearchTrialRecord {
 
 export type ResearchRunStatus = "RUNNING" | "COMPLETED" | "FAILED";
 
+export interface ResearchRunEvidence {
+  datasetFingerprint: string;
+  holdoutFingerprint: string;
+  annualization: number;
+  split: {
+    discovery: { observations: number; firstTimestamp: number; lastTimestamp: number };
+    validation: { observations: number; firstTimestamp: number; lastTimestamp: number };
+    finalHoldout: { observations: number; firstTimestamp: number; lastTimestamp: number };
+  };
+  finalHoldout: {
+    netReturn: number;
+    annualReturn: number;
+    sharpe: number;
+    sortino: number;
+    maxDrawdown: number;
+    profitFactor: number;
+    expectancy: number;
+    totalTrades: number;
+    winRate: number;
+  };
+  researchValidation: {
+    overallVerdict: ValidationVerdict;
+    checks: ValidationCheck[];
+  };
+  purgedCv?: PurgedCvEvidence;
+}
+
 export interface ResearchRunRecord {
   schemaVersion: 1;
   runId: string;
@@ -57,6 +90,7 @@ export interface ResearchRunRecord {
   status: ResearchRunStatus;
   selectedTrialId?: string;
   error?: string;
+  evidence?: ResearchRunEvidence;
 }
 
 export interface ResearchRunFinish {
@@ -64,6 +98,7 @@ export interface ResearchRunFinish {
   updatedAt: number;
   selectedTrialId?: string;
   error?: string;
+  evidence?: ResearchRunEvidence;
 }
 
 export type ResearchAppendResult = "inserted" | "duplicate";
@@ -303,7 +338,8 @@ export class PostgresResearchLedger implements ResearchLedger {
           SET status = $2,
               updated_at_ms = $3,
               selected_trial_id = $4,
-              error = $5
+              error = $5,
+              evidence = $6::jsonb
         WHERE run_id = $1 AND status = 'RUNNING'
         RETURNING run_id`,
       [
@@ -312,6 +348,7 @@ export class PostgresResearchLedger implements ResearchLedger {
         finish.updatedAt,
         finish.selectedTrialId ?? null,
         finish.error ?? null,
+        finish.evidence ? JSON.stringify(finish.evidence) : null,
       ]
     );
     if (result.rowCount === 1) return;
@@ -326,7 +363,7 @@ export class PostgresResearchLedger implements ResearchLedger {
     validateRunId(runId);
     await this.ready;
     const result = await this.pool.query(
-      `SELECT run_id, created_at_ms, updated_at_ms, status, selected_trial_id, error
+      `SELECT run_id, created_at_ms, updated_at_ms, status, selected_trial_id, error, evidence
          FROM ${this.table("research_runs")}
         WHERE run_id = $1`,
       [runId]
@@ -341,6 +378,9 @@ export class PostgresResearchLedger implements ResearchLedger {
       status: row.status as ResearchRunStatus,
       ...(row.selected_trial_id ? { selectedTrialId: String(row.selected_trial_id) } : {}),
       ...(row.error ? { error: String(row.error) } : {}),
+      ...(row.evidence ? {
+        evidence: (typeof row.evidence === "string" ? JSON.parse(row.evidence) : row.evidence) as ResearchRunEvidence,
+      } : {}),
     };
     validateRunRecord(record);
     return record;
@@ -431,8 +471,13 @@ export class PostgresResearchLedger implements ResearchLedger {
           updated_at_ms BIGINT NOT NULL,
           status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
           selected_trial_id TEXT,
-          error TEXT
+          error TEXT,
+          evidence JSONB
         )`
+      );
+      await client.query(
+        `ALTER TABLE ${this.table("research_runs")}
+           ADD COLUMN IF NOT EXISTS evidence JSONB`
       );
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.table("research_trials")} (
@@ -481,11 +526,30 @@ export class PostgresResearchLedger implements ResearchLedger {
   }
 }
 
+export interface PurgedCvFoldEvidence {
+  fold: number;
+  trainObservations: number;
+  testObservations: number;
+  testStartTimestamp: number;
+  testEndTimestamp: number;
+  sharpe: number;
+  netReturn: number;
+  maxDrawdown: number;
+  totalTrades: number;
+  annualization: number;
+}
+
 export interface PurgedCvEvidence {
   nObservations: number;
   nSplits?: number;
   purgeBars?: number;
   embargoBars?: number;
+  evaluatedFolds?: number;
+  positiveSharpeFraction?: number;
+  medianSharpe?: number;
+  meanNetReturn?: number;
+  worstMaxDrawdown?: number;
+  folds?: PurgedCvFoldEvidence[];
 }
 
 export interface ResearchEvidenceBuildOptions {
@@ -626,6 +690,16 @@ export function validateRecord(value: unknown): asserts value is ResearchTrialRe
   if (record.metrics.outOfSampleReturns !== undefined) {
     validateReturnPath(record.metrics.outOfSampleReturns, "metrics.outOfSampleReturns");
   }
+  if (record.metrics.purgedCv?.folds !== undefined) {
+    if (!Array.isArray(record.metrics.purgedCv.folds) || record.metrics.purgedCv.folds.length === 0) {
+      throw new Error("metrics.purgedCv.folds must be a non-empty array");
+    }
+    for (const fold of record.metrics.purgedCv.folds) {
+      if (!Number.isFinite(fold.sharpe) || !Number.isFinite(fold.netReturn)) {
+        throw new Error("metrics.purgedCv fold metrics must be finite");
+      }
+    }
+  }
   if (record.metrics.regimeReturns !== undefined) {
     if (!record.metrics.regimeReturns || typeof record.metrics.regimeReturns !== "object") {
       throw new Error("metrics.regimeReturns must be an object");
@@ -673,6 +747,7 @@ export function validateRunRecord(value: unknown): asserts value is ResearchRunR
   if (record.error !== undefined && typeof record.error !== "string") {
     throw new Error("Research run error must be a string");
   }
+  if (record.evidence !== undefined) validateRunEvidence(record.evidence);
 }
 
 export function canonicalJson(value: unknown): string {
@@ -691,6 +766,7 @@ function finishRunRecord(current: ResearchRunRecord, finish: ResearchRunFinish):
     updatedAt: finish.updatedAt,
     ...(finish.selectedTrialId ? { selectedTrialId: finish.selectedTrialId } : {}),
     ...(finish.error ? { error: finish.error } : {}),
+    ...(finish.evidence ? { evidence: structuredClone(finish.evidence) } : {}),
   };
   validateRunRecord(next);
   return next;
@@ -707,13 +783,62 @@ function validateFinish(finish: ResearchRunFinish): void {
   if (finish.error !== undefined && typeof finish.error !== "string") {
     throw new Error("finishRun error must be a string");
   }
+  if (finish.evidence !== undefined) validateRunEvidence(finish.evidence);
 }
 
 function terminalRunMatches(current: ResearchRunRecord, finish: ResearchRunFinish): boolean {
   return current.status === finish.status
     && current.updatedAt === finish.updatedAt
     && (current.selectedTrialId ?? undefined) === (finish.selectedTrialId ?? undefined)
-    && (current.error ?? undefined) === (finish.error ?? undefined);
+    && (current.error ?? undefined) === (finish.error ?? undefined)
+    && canonicalJson(current.evidence ?? null) === canonicalJson(finish.evidence ?? null);
+}
+
+function validateRunEvidence(value: ResearchRunEvidence): void {
+  if (!/^[a-f0-9]{64}$/.test(value.datasetFingerprint)) {
+    throw new Error("evidence.datasetFingerprint must be a SHA-256 hex digest");
+  }
+  if (!/^[a-f0-9]{64}$/.test(value.holdoutFingerprint)) {
+    throw new Error("evidence.holdoutFingerprint must be a SHA-256 hex digest");
+  }
+  if (!Number.isFinite(value.annualization) || value.annualization <= 0) {
+    throw new Error("evidence.annualization must be positive");
+  }
+  for (const [name, range] of Object.entries(value.split)) {
+    if (!Number.isSafeInteger(range.observations) || range.observations <= 0) {
+      throw new Error(`evidence.split.${name}.observations must be positive`);
+    }
+    validateMarketTimestamp(range.firstTimestamp, `evidence.split.${name}.firstTimestamp`);
+    validateMarketTimestamp(range.lastTimestamp, `evidence.split.${name}.lastTimestamp`);
+    if (range.lastTimestamp < range.firstTimestamp) {
+      throw new Error(`evidence.split.${name} timestamps are reversed`);
+    }
+  }
+  for (const [name, number] of Object.entries(value.finalHoldout)) {
+    if (!Number.isFinite(number)) {
+      throw new Error(`evidence.finalHoldout.${name} must be finite`);
+    }
+  }
+  if (
+    value.researchValidation.overallVerdict !== "PASS" &&
+    value.researchValidation.overallVerdict !== "REVIEW" &&
+    value.researchValidation.overallVerdict !== "FAIL"
+  ) {
+    throw new Error("evidence.researchValidation.overallVerdict is invalid");
+  }
+  if (!Array.isArray(value.researchValidation.checks)) {
+    throw new Error("evidence.researchValidation.checks must be an array");
+  }
+  if (value.purgedCv?.folds !== undefined) {
+    if (!Array.isArray(value.purgedCv.folds) || value.purgedCv.folds.length === 0) {
+      throw new Error("evidence.purgedCv.folds must be a non-empty array");
+    }
+    for (const fold of value.purgedCv.folds) {
+      if (!Number.isFinite(fold.sharpe) || !Number.isFinite(fold.netReturn)) {
+        throw new Error("evidence.purgedCv fold metrics must be finite");
+      }
+    }
+  }
 }
 
 function assertRunWritable(run: ResearchRunRecord | undefined, runId: string): void {
@@ -730,6 +855,12 @@ function validateRunId(value: unknown): asserts value is string {
 
 function validateTimestamp(value: number, name: string): void {
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive timestamp`);
+}
+
+function validateMarketTimestamp(value: number, name: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative market timestamp`);
+  }
 }
 
 function validateReturnPath(path: unknown, name: string): void {

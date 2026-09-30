@@ -9,6 +9,7 @@ import {
   buildResearchEvidence,
   createTrialRecord,
   fingerprintStrategy,
+  type ResearchRunEvidence,
   type ResearchTrialRecord,
 } from "../src/index.js";
 
@@ -34,6 +35,35 @@ function strategy(id: string, reverseParams = false): StrategyDefinition {
     entry: { operator: "AND", rules: [{ left: "rsi", operator: "<", right: 30 }] },
     exit: { operator: "OR", rules: [{ left: "rsi", operator: ">", right: 55 }] },
     risk: { stopLossPct: 2, takeProfitPct: 4, maxPositionPct: 3 },
+  };
+}
+
+function runEvidence(): ResearchRunEvidence {
+  const digest = "a".repeat(64);
+  return {
+    datasetFingerprint: digest,
+    holdoutFingerprint: "b".repeat(64),
+    annualization: 8766,
+    split: {
+      discovery: { observations: 60, firstTimestamp: 1, lastTimestamp: 60 },
+      validation: { observations: 20, firstTimestamp: 61, lastTimestamp: 80 },
+      finalHoldout: { observations: 20, firstTimestamp: 81, lastTimestamp: 100 },
+    },
+    finalHoldout: {
+      netReturn: 4,
+      annualReturn: 12,
+      sharpe: 1.1,
+      sortino: 1.4,
+      maxDrawdown: 5,
+      profitFactor: 1.3,
+      expectancy: 0.2,
+      totalTrades: 20,
+      winRate: 55,
+    },
+    researchValidation: {
+      overallVerdict: "PASS",
+      checks: [{ name: "sample", verdict: "PASS" }],
+    },
   };
 }
 
@@ -95,8 +125,10 @@ describe("research ledgers", () => {
       status: "COMPLETED",
       updatedAt: 2_000,
       selectedTrialId: "trial-1",
+      evidence: runEvidence(),
     });
     expect((await ledger.getRun("run-1"))?.status).toBe("COMPLETED");
+    expect((await ledger.getRun("run-1"))?.evidence?.holdoutFingerprint).toBe("b".repeat(64));
     await expect(ledger.append(trial({ trialId: "trial-2" }))).rejects.toThrow(/not writable/);
   });
 
@@ -115,6 +147,7 @@ describe("research ledgers", () => {
       status: "COMPLETED",
       updatedAt: 2_000,
       selectedTrialId: "trial-1",
+      evidence: runEvidence(),
     });
 
     const all = await ledger.list();
@@ -123,6 +156,7 @@ describe("research ledgers", () => {
     expect(run1).toHaveLength(1);
     expect(run1[0].provenance.model).toBe("gpt-6-astra");
     expect((await ledger.getRun("run-1"))?.selectedTrialId).toBe("trial-1");
+    expect((await ledger.getRun("run-1"))?.evidence?.datasetFingerprint).toBe("a".repeat(64));
   });
 
   it("fingerprints canonical Strategy DSL independent of object key order", () => {

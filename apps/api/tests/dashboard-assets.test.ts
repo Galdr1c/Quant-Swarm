@@ -5,17 +5,21 @@ const dashboardUrl = new URL("../../dashboard/", import.meta.url);
 
 describe("research dashboard assets", () => {
   it("ships the cartoon 3D observatory shell and GPU fallback path", async () => {
-    const [html, css, appJs, worldJs] = await Promise.all([
+    const [html, css, appJs, worldJs, serverJs] = await Promise.all([
       readFile(new URL("index.html", dashboardUrl), "utf8"),
       readFile(new URL("styles.css", dashboardUrl), "utf8"),
       readFile(new URL("app.js", dashboardUrl), "utf8"),
       readFile(new URL("world.js", dashboardUrl), "utf8"),
+      readFile(new URL("server.mjs", dashboardUrl), "utf8"),
     ]);
 
     expect(html).toContain("Swarm Observatory");
     expect(html).toContain('meta name="viewport"');
     expect(html).toContain('id="shader-world"');
     expect(html).toContain("./world.js");
+    expect(html).toContain('data-chart-timeframe="5m"');
+    expect(html).toContain('id="price-chart"');
+    expect(html).toContain('id="chart-research-button"');
 
     expect(css).toContain("transform-style:preserve-3d");
     expect(css).toContain("@container");
@@ -27,6 +31,40 @@ describe("research dashboard assets", () => {
     expect(appJs).toContain("startViewTransition");
     expect(appJs).toContain("fleet-row");
     expect(appJs).toContain("positiveHoldoutRate");
+    expect(appJs).toContain("/api/market/history");
+    expect(appJs).toContain("/api/trades");
+    expect(appJs).toContain("/api/portfolio");
+    expect(appJs).toContain("/api/paper/order");
+    expect(appJs).toContain("timeframe: state.chartTimeframe");
+    expect(appJs).toContain("new URLSearchParams({ symbol })");
+    expect(appJs).toContain("trade-marker");
+    expect(appJs).toContain("Math.min(trade.timestamp, lastTs)");
+    expect(appJs).toContain("purged_embargoed_cv");
+    expect(appJs).toContain("CV median Sharpe");
+    expect(appJs).toContain("Positive CV folds");
+    expect(appJs).toContain("paperKillSwitchActive");
+    expect(appJs).toContain("KILL SWITCH ACTIVE");
+    expect(html).toContain('id="paper-portfolio-strip"');
+    expect(html).toContain('id="paper-order-quantity"');
+    expect(html).toContain('id="paper-buy-button"');
+    expect(html).toContain('id="paper-sell-button"');
+    expect(html).toContain('id="paper-daily"');
+    expect(html).toContain('id="paper-risk-status"');
+    expect(html).toContain("Risk gate loading · no live execution");
+    expect(html).toContain("Purged CV · PSR · DSR · PBO · FDR · regime robustness");
+    expect(html).toContain("universe holdout median Sharpe");
+    expect(serverJs).toContain("/api/paper/order");
+    expect(serverJs).toContain("PAPER_MARK_TIMEFRAME");
+    expect(serverJs).toContain("loadOpenPositionMarks");
+    expect(serverJs).toContain("paperMarkTimeframe");
+    expect(serverJs).toContain("PAPER_MARK_TIMEFRAME must be one of");
+    expect(serverJs).toContain("PAPER_DAY_STATE_PATH");
+    expect(serverJs).toContain("PAPER_KILL_SWITCH_PATH");
+    expect(serverJs).toContain("new FileKillSwitchStore");
+    expect(serverJs).toContain("const paperRiskEngine = new RiskEngine");
+    expect(serverJs).toContain("paperKillSwitch");
+    expect(serverJs).toContain("DEFAULT_RISK_LIMITS");
+    expect(serverJs).not.toContain("/api/live/order");
 
     expect(worldJs).toContain('getContext("webgl2"');
     expect(worldJs).toContain("#version 300 es");

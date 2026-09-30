@@ -14,7 +14,7 @@
     "tradingview:smoke": "pnpm --filter @quant-swarm/api run tradingview:smoke",
     "dev:engine": "cd services/quant-engine && python -m uvicorn src.api.server:app --reload --port 8420",
     "research:universe": "pnpm --filter @quant-swarm/api run research:universe",
-    "dashboard": "node apps/dashboard/server.mjs"
+    "dashboard": "pnpm --filter @quant-swarm/api run build:deps && node apps/dashboard/server.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

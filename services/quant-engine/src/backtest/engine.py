@@ -38,6 +38,7 @@ class BacktestResult:
     strategy_id: str
     net_return: float
     annual_return: float
+    annualization: float
     sharpe: float
     sortino: float
     max_drawdown: float
@@ -59,10 +60,13 @@ class BacktestConfig:
     commission_pct: float = 0.04  # 4 bps per side
     slippage_pct: float = 0.02  # 2 bps per side
     position_size_pct: float = 5.0
-    candles_per_year: float = 365.25 * 24 * 4  # fallback for 15m data
+    # Optional explicit override. When omitted, annualization is inferred from
+    # candle timestamps so equities, FX and 24/7 crypto do not share a false
+    # 15-minute/24x7 scaling assumption.
+    candles_per_year: float | None = None
 
 
-def _years_between(timestamps: NDArray, n: int, candles_per_year: float) -> float:
+def _years_between(timestamps: NDArray, n: int, candles_per_year: float | None) -> float:
     if len(timestamps) >= 2:
         start = float(timestamps[0])
         end = float(timestamps[-1])
@@ -73,7 +77,26 @@ def _years_between(timestamps: NDArray, n: int, candles_per_year: float) -> floa
             years = seconds / (365.25 * 24 * 60 * 60)
             if years > 0:
                 return years
-    return max(n / max(candles_per_year, 1.0), 1e-9)
+    fallback = candles_per_year if candles_per_year is not None else 365.25 * 24 * 4
+    return max(n / max(fallback, 1.0), 1e-9)
+
+
+def _periods_per_year(
+    timestamps: NDArray,
+    n: int,
+    override: float | None,
+) -> float:
+    if override is not None:
+        if not math.isfinite(override) or override <= 0:
+            raise ValueError("candles_per_year must be positive when provided")
+        return float(override)
+    if len(timestamps) >= 2 and n >= 2:
+        years = _years_between(timestamps, n, None)
+        observed_periods = max(n - 1, 1)
+        inferred = observed_periods / years
+        if math.isfinite(inferred) and inferred > 0:
+            return float(inferred)
+    return 365.25 * 24 * 4
 
 
 def run_backtest(
@@ -91,10 +114,14 @@ def run_backtest(
         config = BacktestConfig()
 
     n = len(close)
-    if not (len(open_arr) == len(high) == len(low) == len(volume) == n):
-        raise ValueError("OHLCV arrays must have identical lengths")
+    if not (
+        len(open_arr) == len(high) == len(low) == len(volume) == len(timestamps) == n
+    ):
+        raise ValueError("OHLCV and timestamp arrays must have identical lengths")
     if n == 0:
         raise ValueError("OHLCV arrays must not be empty")
+    if n > 1 and np.any(np.diff(np.asarray(timestamps, dtype=np.int64)) <= 0):
+        raise ValueError("timestamps must be strictly increasing")
     if config.initial_capital <= 0:
         raise ValueError("initial_capital must be positive")
 
@@ -106,7 +133,7 @@ def run_backtest(
     position_pct = min(max(position_pct, 0.0), 100.0)
 
     entry_signals, exit_signals = generate_signals(
-        strategy, open_arr, high, low, close, volume
+        strategy, open_arr, high, low, close, volume, timestamps
     )
 
     fee_rate = config.commission_pct / 100.0
@@ -239,7 +266,8 @@ def run_backtest(
     total_trades = len(trades)
     net_return = (final_equity / config.initial_capital - 1.0) * 100.0
 
-    years = _years_between(timestamps, n, config.candles_per_year)
+    annualization = _periods_per_year(timestamps, n, config.candles_per_year)
+    years = _years_between(timestamps, n, annualization)
     if final_equity <= 0:
         annual_return = -100.0
     else:
@@ -262,12 +290,12 @@ def run_backtest(
         mean_return = float(np.mean(periodic_returns))
         std_return = float(np.std(periodic_returns, ddof=1))
         if std_return > 1e-12:
-            sharpe = mean_return / std_return * math.sqrt(config.candles_per_year)
+            sharpe = mean_return / std_return * math.sqrt(annualization)
 
         downside = np.minimum(periodic_returns, 0.0)
         downside_deviation = float(np.sqrt(np.mean(np.square(downside))))
         if downside_deviation > 1e-12:
-            sortino = mean_return / downside_deviation * math.sqrt(config.candles_per_year)
+            sortino = mean_return / downside_deviation * math.sqrt(annualization)
 
     trade_returns = np.asarray([t.pnl_pct for t in trades], dtype=np.float64)
     trade_pnls = np.asarray([t.pnl for t in trades], dtype=np.float64)
@@ -292,6 +320,7 @@ def run_backtest(
         strategy_id=strategy_id,
         net_return=round(float(net_return), 4),
         annual_return=round(float(annual_return), 4),
+        annualization=round(float(annualization), 8),
         sharpe=round(float(sharpe), 4),
         sortino=round(float(sortino), 4),
         max_drawdown=round(float(max_drawdown), 4),

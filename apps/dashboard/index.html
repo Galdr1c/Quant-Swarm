@@ -35,7 +35,7 @@
 
       <div class="mode-card sticker tilt-card">
         <div class="mode-orb"><span></span></div>
-        <div><strong>Shadow Mode</strong><p>Research only.<br>Execution stays asleep.</p></div>
+        <div><strong>Paper Sandbox</strong><p>Risk-gated paper fills.<br>Live stays asleep.</p></div>
       </div>
 
       <div class="sidebar-source">
@@ -63,7 +63,7 @@
         <div class="status-badge"><span class="dot live"></span><small>Source</small><strong>TradingView</strong></div>
         <div class="status-badge"><span class="mini-icon">◷</span><small>Last scan</small><strong id="generated-at">—</strong></div>
         <div class="status-badge"><span class="mini-icon">◉</span><small>Gate</small><strong>Final holdout</strong></div>
-        <div class="status-badge"><span class="mini-icon">☁</span><small>Execution</small><strong>Sleeping</strong></div>
+        <div class="status-badge"><span class="mini-icon">☁</span><small>Execution</small><strong>Paper only</strong></div>
         <em id="demo-badge" class="demo-badge" hidden>DEMO GALAXY</em>
       </section>
 
@@ -127,42 +127,83 @@
 
       <section class="lab-grid" id="evidence">
         <article class="chart-lab cartoon-surface tilt-card">
-          <div class="panel-head">
-            <div><span class="panel-kicker">FINAL HOLDOUT FLIGHT PATH</span><h2>Equity comet</h2></div>
-            <div class="chart-legend"><span></span> selected strategy</div>
+          <div class="panel-head market-chart-head">
+            <div>
+              <span class="panel-kicker">MARKET PRICE + TRADE TAPE</span>
+              <h2 id="market-chart-symbol">Select a market</h2>
+            </div>
+            <div class="market-chart-actions">
+              <div id="chart-timeframes" class="timeframe-switch" aria-label="Chart timeframe">
+                <button type="button" data-chart-timeframe="5m">5m</button>
+                <button type="button" data-chart-timeframe="15m">15m</button>
+                <button type="button" data-chart-timeframe="1h" class="active">1h</button>
+                <button type="button" data-chart-timeframe="4h">4h</button>
+                <button type="button" data-chart-timeframe="1d">1d</button>
+              </div>
+              <button id="chart-research-button" class="bubble-button market-chart-research" type="button" disabled>Analyze 1h</button>
+            </div>
           </div>
           <div class="chart-stage">
             <div class="chart-bubble bubble-one"></div>
             <div class="chart-bubble bubble-two"></div>
-            <svg id="equity-chart" viewBox="0 0 760 250" role="img" aria-label="Final holdout equity curve">
+            <svg id="price-chart" viewBox="0 0 760 250" role="img" aria-label="Selected market price with paper and live trade markers">
               <defs>
-                <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#7bf7db" stop-opacity=".42"/>
+                <linearGradient id="priceAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#7bf7db" stop-opacity=".32"/>
                   <stop offset="100%" stop-color="#7bf7db" stop-opacity="0"/>
                 </linearGradient>
-                <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
               </defs>
               <g class="chart-grid"><line x1="0" y1="40" x2="760" y2="40"/><line x1="0" y1="100" x2="760" y2="100"/><line x1="0" y1="160" x2="760" y2="160"/><line x1="0" y1="220" x2="760" y2="220"/></g>
-              <path id="area-path" class="area-path"></path>
-              <path id="line-path" class="line-path" filter="url(#glow)"></path>
+              <path id="price-area-path" class="area-path"></path>
+              <path id="price-line-path" class="line-path"></path>
+              <g id="trade-marker-layer"></g>
             </svg>
           </div>
-          <div class="chart-caption"><span>Discovery</span><i></i><span>Validation/OOS</span><i></i><strong>Final holdout</strong></div>
+          <div class="market-chart-footer">
+            <div class="trade-legend" aria-label="Trade marker legend">
+              <span><i class="trade-dot paper-buy"></i>Paper buy/sell</span>
+              <span><i class="trade-dot live-buy"></i>Live buy/sell</span>
+            </div>
+            <strong id="market-chart-status">Select an opportunity to load TradingView prices.</strong>
+          </div>
+          <div id="paper-portfolio-strip" class="paper-portfolio-strip" aria-label="Paper portfolio">
+            <span><small>Paper equity</small><strong id="paper-equity">—</strong></span>
+            <span><small>Cash</small><strong id="paper-cash">—</strong></span>
+            <span><small>Realized PnL</small><strong id="paper-realized">—</strong></span>
+            <span><small>Unrealized PnL</small><strong id="paper-unrealized">—</strong></span>
+            <span><small>Day PnL</small><strong id="paper-daily">—</strong></span>
+            <span><small>Open positions</small><strong id="paper-positions">—</strong></span>
+          </div>
+          <div class="paper-trade-panel" aria-label="Paper trading controls">
+            <div>
+              <span class="panel-kicker">PAPER ONLY</span>
+              <strong id="paper-order-market">Select a market</strong>
+              <small id="paper-risk-status">Risk gate loading · no live execution</small>
+            </div>
+            <label class="paper-qty-label">
+              <span>Qty</span>
+              <input id="paper-order-quantity" type="number" min="0.00000001" step="any" value="1" inputmode="decimal">
+            </label>
+            <div class="paper-order-buttons">
+              <button id="paper-buy-button" type="button" disabled>Paper Buy</button>
+              <button id="paper-sell-button" type="button" disabled>Paper Sell</button>
+            </div>
+          </div>
         </article>
 
         <article class="evidence-tower cartoon-surface tilt-card">
           <div class="panel-head">
             <div><span class="panel-kicker">EVIDENCE QUALITY</span><h2>Stat shield</h2></div>
-            <div class="shield-score"><small>median Sharpe</small><strong id="median-sharpe">—</strong></div>
+            <div class="shield-score"><small>universe holdout median Sharpe</small><strong id="median-sharpe">—</strong></div>
           </div>
           <div id="validation-list" class="validation-list"></div>
-          <div class="shield-footer"><span class="tiny-bee">✦</span><p>PSR · DSR · PBO · FDR · regime robustness</p></div>
+          <div class="shield-footer"><span class="tiny-bee">✦</span><p>Purged CV · PSR · DSR · PBO · FDR · regime robustness</p></div>
         </article>
       </section>
 
       <section class="opportunity-world cartoon-surface" id="opportunities">
         <div class="panel-head table-head">
-          <div><span class="panel-kicker">THE SURVIVING SWARM</span><h2>Opportunity fleet</h2><p>Ranked by research verdict, then final-holdout Sharpe and return.</p></div>
+          <div><span class="panel-kicker">THE SURVIVING SWARM</span><h2>Opportunity fleet</h2><p>Ranked only by validation/OOS Sharpe and return. Final holdout is evidence, never a ranking input.</p></div>
           <div id="filters" class="filters" aria-label="Filter opportunities">
             <button class="filter active" data-filter="ALL" type="button">All</button>
             <button class="filter" data-filter="PASS" type="button">Pass</button>
@@ -237,6 +278,7 @@
         </div>
         <label class="market-field-label" for="market-timeframe">Zaman dilimi</label>
         <select id="market-timeframe">
+          <option value="5m">5 dakika</option>
           <option value="15m">15 dakika</option>
           <option value="1h" selected>1 saat</option>
           <option value="4h">4 saat</option>

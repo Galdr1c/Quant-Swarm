@@ -6,7 +6,7 @@
   "main": "./dist/pipeline.js",
   "scripts": {
     "build": "tsc",
-    "build:deps": "pnpm -r --filter @quant-swarm/shared --filter @quant-swarm/strategy-schema --filter @quant-swarm/market-data --filter @quant-swarm/risk-contracts --filter @quant-swarm/research-ledger --filter @quant-swarm/ai-orchestrator build",
+    "build:deps": "pnpm -r --filter @quant-swarm/shared --filter @quant-swarm/strategy-schema --filter @quant-swarm/market-data --filter @quant-swarm/risk-contracts --filter @quant-swarm/trade-ledger --filter @quant-swarm/research-ledger --filter @quant-swarm/ai-orchestrator build",
     "test": "vitest run --passWithNoTests",
     "pipeline": "pnpm run build:deps && tsc && node dist/pipeline.js",
     "research:run": "pnpm run build:deps && tsc && node dist/research.js",

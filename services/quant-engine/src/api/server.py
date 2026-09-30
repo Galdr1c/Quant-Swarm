@@ -8,7 +8,12 @@ from pydantic import BaseModel, Field
 
 from ..backtest.engine import BacktestConfig, run_backtest
 from ..scanners.anomaly_scanner import scan_ohlcv
-from ..validation.advanced import equity_returns, probabilistic_sharpe_ratio, sharpe_ratio
+from ..validation.advanced import (
+    equity_returns,
+    probabilistic_sharpe_ratio,
+    purged_kfold_splits,
+    sharpe_ratio,
+)
 from ..validation.regimes import (
     RegimeCalibration,
     calibrate_regime_thresholds,
@@ -39,6 +44,15 @@ class ScanRequest(BaseModel):
 class BacktestRequest(BaseModel):
     strategy: dict[str, Any]
     candles: list[Candle]
+    config: dict[str, Any] | None = None
+
+
+class PurgedCvRequest(BaseModel):
+    strategy: dict[str, Any]
+    candles: list[Candle]
+    nSplits: int = Field(default=5, ge=2, le=20)
+    purgeBars: int = Field(default=1, ge=0, le=500)
+    embargoBars: int = Field(default=1, ge=0, le=500)
     config: dict[str, Any] | None = None
 
 
@@ -151,6 +165,7 @@ def backtest(req: BacktestRequest) -> dict[str, Any]:
             "strategyId": payload["strategy_id"],
             "netReturn": payload["net_return"],
             "annualReturn": payload["annual_return"],
+            "annualization": payload["annualization"],
             "sharpe": payload["sharpe"],
             "sortino": payload["sortino"],
             "maxDrawdown": payload["max_drawdown"],
@@ -164,6 +179,86 @@ def backtest(req: BacktestRequest) -> dict[str, Any]:
             "slippagePaid": payload["slippage_paid"],
             "trades": payload["trades"],
             "equityCurve": payload["equity_curve"],
+        }
+    )
+
+
+@app.post("/validate/purged-cv")
+def purged_cv(req: PurgedCvRequest) -> dict[str, Any]:
+    """Evaluate one fixed Strategy DSL on each purged/embargoed test fold.
+
+    The strategy is already fully specified, so no synthetic refit step is
+    invented. Training indices are still reported to prove the requested
+    purge/embargo separation, while every fold's test block is independently
+    backtested by the deterministic engine.
+    """
+    if len(req.candles) < max(req.nSplits * 4, 20):
+        raise HTTPException(
+            status_code=400,
+            detail="candles are too short for deterministic purged CV folds",
+        )
+
+    try:
+        splits = purged_kfold_splits(
+            n_samples=len(req.candles),
+            n_splits=req.nSplits,
+            purge=req.purgeBars,
+            embargo=req.embargoBars,
+        )
+        config = BacktestConfig(**(req.config or {}))
+        folds: list[dict[str, Any]] = []
+
+        for fold_index, split in enumerate(splits):
+            test_indices = split.test_indices
+            if len(test_indices) < 4:
+                raise ValueError(
+                    f"fold {fold_index + 1} has fewer than four test observations"
+                )
+            test_candles = [req.candles[index] for index in test_indices]
+            ts, o, h, l, close, volume = _arrays(test_candles)
+            result = run_backtest(
+                req.strategy,
+                o,
+                h,
+                l,
+                close,
+                volume,
+                ts,
+                config,
+            )
+            payload = asdict(result)
+            folds.append(
+                {
+                    "fold": fold_index + 1,
+                    "trainObservations": len(split.train_indices),
+                    "testObservations": len(test_indices),
+                    "testStartTimestamp": int(test_candles[0].timestamp),
+                    "testEndTimestamp": int(test_candles[-1].timestamp),
+                    "sharpe": float(payload["sharpe"]),
+                    "netReturn": float(payload["net_return"]),
+                    "maxDrawdown": float(payload["max_drawdown"]),
+                    "totalTrades": int(payload["total_trades"]),
+                    "annualization": float(payload["annualization"]),
+                }
+            )
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    sharpes = np.asarray([fold["sharpe"] for fold in folds], dtype=np.float64)
+    returns = np.asarray([fold["netReturn"] for fold in folds], dtype=np.float64)
+    drawdowns = np.asarray([fold["maxDrawdown"] for fold in folds], dtype=np.float64)
+    return _json_safe(
+        {
+            "nObservations": len(req.candles),
+            "nSplits": req.nSplits,
+            "purgeBars": req.purgeBars,
+            "embargoBars": req.embargoBars,
+            "evaluatedFolds": len(folds),
+            "positiveSharpeFraction": float(np.mean(sharpes > 0.0)),
+            "medianSharpe": float(np.median(sharpes)),
+            "meanNetReturn": float(np.mean(returns)),
+            "worstMaxDrawdown": float(np.max(drawdowns)),
+            "folds": folds,
         }
     )
 

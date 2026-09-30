@@ -19,6 +19,24 @@ function completed(
     timeframe: "1h",
     status: "COMPLETED",
     verdict,
+    validation: {
+      netReturn,
+      annualReturn: netReturn,
+      sharpe,
+      sortino: sharpe,
+      maxDrawdown: -8,
+      profitFactor: 1.4,
+      expectancy: 1,
+      totalTrades: 10,
+      winRate: 55,
+    },
+    purgedCv: {
+      evaluatedFolds: 5,
+      positiveSharpeFraction: 0.8,
+      medianSharpe: sharpe - 0.1,
+      meanNetReturn: netReturn / 2,
+      worstMaxDrawdown: 9,
+    },
     finalHoldout: {
       netReturn,
       annualReturn: netReturn,
@@ -34,7 +52,7 @@ function completed(
 }
 
 describe("universe research report", () => {
-  it("ranks verdict before Sharpe and holdout return", () => {
+  it("ranks on validation/OOS and never uses final holdout verdict for ordering", () => {
     const ranked = rankUniverseResults([
       completed("NASDAQ:B", "REVIEW", 9, 90),
       completed("NASDAQ:A", "PASS", 1.2, 10),
@@ -43,9 +61,9 @@ describe("universe research report", () => {
     ]);
 
     expect(ranked.map((row) => row.symbol)).toEqual([
+      "NASDAQ:B",
       "NASDAQ:C",
       "NASDAQ:A",
-      "NASDAQ:B",
       "NASDAQ:D",
     ]);
   });
@@ -77,6 +95,12 @@ describe("universe research report", () => {
       generatedAt: "2026-09-22T00:00:00.000Z",
       source: "tradingview",
       summary: { assets: 1, pass: 1 },
+      results: [{
+        purgedCv: {
+          evaluatedFolds: 5,
+          positiveSharpeFraction: 0.8,
+        },
+      }],
     });
   });
 

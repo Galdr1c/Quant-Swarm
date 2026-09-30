@@ -163,6 +163,8 @@ async function main(): Promise<void> {
       options: {
         runId,
         annualization: 365.25 * 24 * 4,
+        allowIdenticalHoldoutReuse:
+          process.env.RESEARCH_ALLOW_HOLDOUT_REUSE === "true",
         coordinator: {
           maxConcurrency: Number(process.env.RESEARCH_MAX_CONCURRENCY ?? 3),
           timeoutMs: Number(process.env.RESEARCH_AGENT_TIMEOUT_MS ?? 90_000),
@@ -199,6 +201,7 @@ async function main(): Promise<void> {
       selectedTrialId: result.selectedTrialId,
       selectedStrategyId: result.selectedStrategy.id,
       ledgerBackend: backend,
+      datasetIdentity: result.datasetIdentity,
       regimeCalibration: result.regimeCalibration,
       validation: {
         sharpe: result.validationBacktest.sharpe,
