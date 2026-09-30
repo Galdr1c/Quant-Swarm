@@ -14,6 +14,14 @@ export interface UniverseBacktestSnapshot {
   winRate: number;
 }
 
+export interface UniversePurgedCvSnapshot {
+  evaluatedFolds: number;
+  positiveSharpeFraction: number;
+  medianSharpe: number;
+  meanNetReturn: number;
+  worstMaxDrawdown: number;
+}
+
 export interface UniverseResearchResult {
   symbol: string;
   timeframe: string;
@@ -32,6 +40,7 @@ export interface UniverseResearchResult {
   finalHoldout?: UniverseBacktestSnapshot;
   verdict?: ValidationVerdict;
   checks?: ValidationCheck[];
+  purgedCv?: UniversePurgedCvSnapshot;
   equityCurve?: number[];
   error?: string;
 }
