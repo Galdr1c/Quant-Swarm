@@ -338,6 +338,35 @@ export class PaperPortfolio {
     };
   }
 
+  previewRiskStateAfterFill(
+    fill: TradeFill,
+    marks: Readonly<Record<string, number>> = {},
+    dayStartEquity?: number,
+    historicalPeakEquity?: number
+  ): PortfolioState {
+    const projected = this.clone();
+    projected.applyFill(fill);
+    return projected.toRiskState(
+      marks,
+      dayStartEquity,
+      historicalPeakEquity
+    );
+  }
+
+  private clone(): PaperPortfolio {
+    const copy = new PaperPortfolio(this.initialCash);
+    copy.cashValue = this.cashValue;
+    copy.peakEquityValue = this.peakEquityValue;
+    copy.totalFeesValue = this.totalFeesValue;
+    for (const [symbol, position] of this.positions) {
+      copy.positions.set(symbol, { ...position });
+    }
+    for (const [symbol, realizedPnl] of this.realizedPnlBySymbol) {
+      copy.realizedPnlBySymbol.set(symbol, realizedPnl);
+    }
+    return copy;
+  }
+
   toRiskState(
     marks: Readonly<Record<string, number>> = {},
     dayStartEquity?: number,
@@ -567,13 +596,33 @@ export class PaperExecutor {
 
     const fill = this.buildFill(order, executionPrice);
 
-    // Validate cash/position constraints before persistence so the append-only
-    // ledger never contains a fill the paper account could not actually settle.
+    // Validate cash/position constraints and the exact post-settlement risk
+    // state before persistence. Fees/slippage can push a portfolio across a
+    // daily-loss, drawdown, or exposure boundary even when the pre-order state
+    // itself is still inside the limit.
     portfolio.assertCanApply(fill);
+    const projectedState = portfolio.previewRiskStateAfterFill(
+      fill,
+      marks,
+      dayStartEquity,
+      historicalPeakEquity
+    );
+    const projectedRisk = evaluateProjectedPaperState(
+      riskEngine,
+      projectedState,
+      order.symbol
+    );
+    if (!projectedRisk.approved) {
+      return {
+        risk: projectedRisk,
+        portfolio: portfolio.snapshot(marks, historicalPeakEquity),
+      };
+    }
+
     await this.ledger.append(fill);
     portfolio.applyFill(fill);
     return {
-      risk,
+      risk: projectedRisk,
       fill,
       portfolio: portfolio.snapshot(marks, historicalPeakEquity),
     };
@@ -700,6 +749,36 @@ export function validateTradeFill(value: unknown): asserts value is TradeFill {
   if (typeof fill.strategyId !== "string" || !fill.strategyId.trim()) {
     throw new Error("Trade fill strategyId is required");
   }
+}
+
+function evaluateProjectedPaperState(
+  riskEngine: RiskEngine,
+  state: PortfolioState,
+  symbol: string
+): RiskDecision {
+  const limits = riskEngine.getLimits();
+
+  if (state.dailyPnlPct <= -limits.maxDailyLossPct) {
+    return { approved: false, reason: "DAILY_LOSS_LIMIT" };
+  }
+  if (state.drawdownPct >= limits.maxDrawdownPct) {
+    riskEngine.activateKillSwitch();
+    return { approved: false, reason: "MAX_DRAWDOWN" };
+  }
+  if (state.totalExposurePct > limits.maxPortfolioExposurePct) {
+    return { approved: false, reason: "MAX_PORTFOLIO_EXPOSURE" };
+  }
+
+  const symbolExposure = state.symbolExposures.get(symbol) ?? 0;
+  if (symbolExposure > limits.maxSymbolExposurePct) {
+    return { approved: false, reason: "MAX_SYMBOL_EXPOSURE" };
+  }
+
+  return {
+    approved: true,
+    projectedPortfolioExposurePct: state.totalExposurePct,
+    projectedSymbolExposurePct: symbolExposure,
+  };
 }
 
 function canonicalTrade(fill: TradeFill): string {
