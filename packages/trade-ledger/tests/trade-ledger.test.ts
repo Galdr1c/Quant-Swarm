@@ -203,6 +203,75 @@ describe("trade ledger and paper executor", () => {
     expect(await ledger.list()).toEqual([]);
   });
 
+  it("rejects a fill when fees push projected daily loss through the limit", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const ledger = new JsonlTradeLedger(join(dir, "daily-loss-preview.jsonl"));
+    const executor = new PaperExecutor(ledger, {
+      slippageBps: 0,
+      feeBps: 100,
+      idFactory: () => "daily-loss-preview",
+    });
+    const risk = new RiskEngine(
+      {
+        ...DEFAULT_RISK_LIMITS,
+        maxPortfolioExposurePct: 100,
+        maxSymbolExposurePct: 100,
+      },
+      "paper"
+    );
+    const portfolio = new PaperPortfolio(100_000);
+
+    const result = await executor.executeAgainstPortfolio(
+      { ...order(), quantity: 50, price: 200 },
+      portfolio,
+      risk,
+      { "NASDAQ:AAPL": 200 },
+      103_000
+    );
+
+    expect(result.risk).toEqual({ approved: false, reason: "DAILY_LOSS_LIMIT" });
+    expect(await ledger.list()).toEqual([]);
+    expect(portfolio.snapshot().cash).toBe(100_000);
+  });
+
+  it("rejects and sticks the kill switch when settlement costs cross max drawdown", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const ledger = new JsonlTradeLedger(join(dir, "drawdown-preview.jsonl"));
+    const killSwitch = new FileKillSwitchStore(join(dir, "kill.json"));
+    const executor = new PaperExecutor(ledger, {
+      slippageBps: 0,
+      feeBps: 500,
+      idFactory: () => "drawdown-preview",
+    });
+    const risk = new RiskEngine(
+      {
+        ...DEFAULT_RISK_LIMITS,
+        maxPortfolioExposurePct: 100,
+        maxSymbolExposurePct: 100,
+        maxDailyLossPct: 50,
+        maxDrawdownPct: 15,
+      },
+      "paper",
+      false,
+      killSwitch
+    );
+    const portfolio = new PaperPortfolio(100_000);
+
+    const result = await executor.executeAgainstPortfolio(
+      { ...order(), quantity: 50, price: 200 },
+      portfolio,
+      risk,
+      { "NASDAQ:AAPL": 200 },
+      100_000,
+      117_000
+    );
+
+    expect(result.risk).toEqual({ approved: false, reason: "MAX_DRAWDOWN" });
+    expect(risk.isKillSwitchActive()).toBe(true);
+    expect(await ledger.list()).toEqual([]);
+    expect(portfolio.snapshot().cash).toBe(100_000);
+  });
+
   it("persists a sticky kill switch across store instances", async () => {
     const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
     const path = join(dir, "paper-kill-switch.json");
