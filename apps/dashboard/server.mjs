@@ -228,10 +228,14 @@ async function paperOrder(req, res) {
       paperInitialCash,
       paperRiskEngine,
       marks,
-      dayState.dayStartEquity
+      dayState.dayStartEquity,
+      dayState.peakEquity
     );
 
     const portfolio = result.portfolio;
+    const updatedDayState = portfolio
+      ? await paperDayState.getOrCreate(portfolio.equity)
+      : dayState;
     const dailyPnl = portfolio
       ? portfolio.equity - dayState.dayStartEquity
       : currentSnapshot.equity - dayState.dayStartEquity;
@@ -242,7 +246,7 @@ async function paperOrder(req, res) {
         error: "Paper order rejected by risk engine.",
         risk: result.risk,
         portfolio,
-        dayState,
+        dayState: updatedDayState,
         dailyPnl,
         dailyPnlPct
       });
@@ -252,7 +256,7 @@ async function paperOrder(req, res) {
       fill: result.fill,
       risk: result.risk,
       portfolio,
-      dayState,
+      dayState: updatedDayState,
       dailyPnl,
       dailyPnlPct
     });
@@ -273,13 +277,10 @@ async function paperPortfolio(url, res) {
 
   try {
     const portfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
-    const snapshot = portfolio.snapshot(marks);
-    const storedDayState = await paperDayState.read();
-    const today = new Date().toISOString().slice(0, 10);
-    const dayStartEquity =
-      storedDayState?.utcDate === today
-        ? storedDayState.dayStartEquity
-        : snapshot.equity;
+    const rawSnapshot = portfolio.snapshot(marks);
+    const dayState = await paperDayState.getOrCreate(rawSnapshot.equity);
+    const snapshot = portfolio.snapshot(marks, dayState.peakEquity);
+    const dayStartEquity = dayState.dayStartEquity;
     const dailyPnl = snapshot.equity - dayStartEquity;
     return sendJson(res, 200, {
       ...snapshot,
