@@ -10,6 +10,7 @@ import {
   searchTradingViewMarkets
 } from "../../packages/market-data/dist/tradingview.js";
 import {
+  FileKillSwitchStore,
   JsonlTradeLedger,
   JsonPaperDayStateStore,
   PaperExecutor,
@@ -34,11 +35,20 @@ const paperDayStatePath = resolve(
   process.env.PAPER_DAY_STATE_PATH ?? ".data/paper-day-state.json"
 );
 const paperDayState = new JsonPaperDayStateStore(paperDayStatePath);
+const paperKillSwitchPath = resolve(
+  process.env.PAPER_KILL_SWITCH_PATH ?? ".data/paper-kill-switch.json"
+);
+const paperKillSwitch = new FileKillSwitchStore(paperKillSwitchPath);
 const paperExecutor = new PaperExecutor(tradeLedger, {
   slippageBps: paperSlippageBps,
   feeBps: paperFeeBps
 });
-const paperRiskEngine = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
+const paperRiskEngine = new RiskEngine(
+  DEFAULT_RISK_LIMITS,
+  "paper",
+  false,
+  paperKillSwitch
+);
 const researchRunnerPath = join(repoRoot, "apps", "api", "dist", "universe.js");
 const supportedMarketTypes = new Set([
   "",
