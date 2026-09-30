@@ -243,10 +243,7 @@ async function paperOrder(req, res) {
         price,
         leverage: 1,
         strategyId,
-        reduceOnly:
-          typeof payload?.reduceOnly === "boolean"
-            ? payload.reduceOnly
-            : side === "SELL"
+        reduceOnly: side === "SELL"
       };
       const result = await paperExecutor.executeFromLedger(
         order,
