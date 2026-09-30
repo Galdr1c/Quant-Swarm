@@ -133,6 +133,57 @@ describe("RiskEngine", () => {
     if (!result.approved) expect(result.reason).toBe("INVALID_ORDER");
   });
 
+  it("fails closed on non-finite or negative portfolio risk state", () => {
+    const engine = new RiskEngine(DEFAULT_RISK_LIMITS, "shadow");
+    const malformedStates: PortfolioState[] = [
+      makeState({ dailyPnlPct: Number.NaN }),
+      makeState({ drawdownPct: Number.POSITIVE_INFINITY }),
+      makeState({ totalExposurePct: -1 }),
+      makeState({ symbolExposures: new Map([["BTCUSDT", Number.NaN]]) }),
+      makeState({ symbolExposures: new Map([["BTCUSDT", -1]]) }),
+    ];
+
+    for (const state of malformedStates) {
+      expect(engine.evaluateOrder(makeOrder(), state)).toEqual({
+        approved: false,
+        reason: "INVALID_ORDER",
+      });
+    }
+  });
+
+  it("rejects zero leverage and empty order identifiers", () => {
+    const engine = new RiskEngine(DEFAULT_RISK_LIMITS, "shadow");
+    expect(engine.evaluateOrder(makeOrder({ leverage: 0 }), makeState())).toEqual({
+      approved: false,
+      reason: "INVALID_ORDER",
+    });
+    expect(engine.evaluateOrder(makeOrder({ symbol: " " }), makeState())).toEqual({
+      approved: false,
+      reason: "INVALID_ORDER",
+    });
+    expect(engine.evaluateOrder(makeOrder({ strategyId: "" }), makeState())).toEqual({
+      approved: false,
+      reason: "INVALID_ORDER",
+    });
+  });
+
+  it("rejects invalid risk-limit configuration at construction", () => {
+    expect(
+      () =>
+        new RiskEngine(
+          { ...DEFAULT_RISK_LIMITS, maxDailyLossPct: Number.NaN },
+          "shadow"
+        )
+    ).toThrow(/maxDailyLossPct/);
+    expect(
+      () =>
+        new RiskEngine(
+          { ...DEFAULT_RISK_LIMITS, maxDrawdownPct: 0 },
+          "shadow"
+        )
+    ).toThrow(/maxDrawdownPct/);
+  });
+
   it("limits are frozen and cannot be mutated", () => {
     const engine = new RiskEngine(DEFAULT_RISK_LIMITS, "shadow");
     const limits = engine.getLimits();
