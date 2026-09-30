@@ -43,9 +43,12 @@ describe("research dashboard assets", () => {
     expect(html).toContain('id="paper-order-quantity"');
     expect(html).toContain('id="paper-buy-button"');
     expect(html).toContain('id="paper-sell-button"');
+    expect(html).toContain('id="paper-daily"');
     expect(html).toContain("Purged CV · PSR · DSR · PBO · FDR · regime robustness");
     expect(html).toContain("universe holdout median Sharpe");
     expect(serverJs).toContain("/api/paper/order");
+    expect(serverJs).toContain("PAPER_DAY_STATE_PATH");
+    expect(serverJs).toContain("const paperRiskEngine = new RiskEngine");
     expect(serverJs).toContain("new RiskEngine(DEFAULT_RISK_LIMITS, \"paper\")");
     expect(serverJs).not.toContain("/api/live/order");
 
