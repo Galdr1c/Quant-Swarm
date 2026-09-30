@@ -25,7 +25,7 @@ The dashboard never fabricates a live/real marker. A `mode:"live"` point appears
 
 The native paper account reconstructs its state from the append-only fill ledger. `PaperPortfolio` tracks cash, average entry cost, open long quantities, realized/unrealized PnL, fees, peak equity, drawdown and gross/symbol exposure. `PaperExecutor.executeAgainstPortfolio(...)` derives the exact `PortfolioState` consumed by the sovereign risk engine before settling and persisting a fill.
 
-The dashboard rebuilds this account using `PAPER_INITIAL_CASH` (default `100000`) and marks the currently selected symbol at its latest closed TradingView price. Other open symbols fall back to their average entry price until they are selected/marked by an integration.
+The dashboard rebuilds this account using `PAPER_INITIAL_CASH` (default `100000`) and refreshes every open paper position from closed TradingView candles at `PAPER_MARK_TIMEFRAME` before portfolio and risk evaluation. If any required open-position mark cannot be refreshed, paper trading fails closed rather than valuing that position at entry cost.
 
 A paper-only execution endpoint is available at `POST /api/paper/order`. It accepts an exchange-qualified symbol, supported timeframe, `BUY`/`SELL`, positive quantity and optional `strategyId`. The server derives paper marks and the execution reference from fresh closed TradingView candles using `PAPER_MARK_TIMEFRAME` (default `5m`); browser-supplied prices are not trusted. Before every order it refreshes marks for every open paper position, so portfolio exposure, equity and drawdown are evaluated against a common server-side mark horizon. If any open position cannot be marked, the new order fails closed instead of falling back to entry cost. The request is risk-checked at the adverse simulated execution price, settled against a freshly reconstructed paper portfolio, then persisted with `PAPER_SLIPPAGE_BPS` and `PAPER_FEE_BPS`. Ledger-backed executions are serialized so concurrent requests cannot settle against the same stale cash balance. There is intentionally no equivalent live-order endpoint.
 
@@ -219,7 +219,7 @@ Open `http://127.0.0.1:4173`. The dashboard is a responsive **cartoon 3D Researc
 - PSR / DSR / PBO / FDR / regime “stat shield”
 - keyboard-accessible filterable opportunity fleet
 - strategy, candidate and selected-run details
-- persistent Shadow Mode / TradingView-only source state
+- explicit Paper Sandbox / TradingView-only source state; live execution remains disabled
 
 GPU effects are decorative only; research ordering and validation remain deterministic. The shader caps device pixel ratio and pauses when the page is hidden. If no real report exists yet, the dashboard deliberately shows a **Demo galaxy** badge and uses bundled visual sample data.
 
@@ -257,7 +257,7 @@ No broker/exchange execution adapter is enabled.
 - Regime calibration drift monitoring is not implemented.
 - Database migrations remain application-managed.
 - Agent fan-out is fixed rather than adaptive.
-- Kill-switch storage defaults to in-memory.
+- The generic risk-contract library still offers an in-memory kill-switch store, while the dashboard paper path overrides it with the sticky file-backed store described above.
 - TradingView access uses a community client rather than an official production market-data contract.
 - No real-money execution adapter is enabled.
 
