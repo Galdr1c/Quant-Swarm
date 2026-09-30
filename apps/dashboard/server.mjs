@@ -53,9 +53,12 @@ const supportedMarketTypes = new Set([
 const supportedTimeframes = new Set(["5m", "15m", "1h", "4h", "1d"]);
 const configuredPaperMarkTimeframe =
   (process.env.PAPER_MARK_TIMEFRAME ?? "5m").trim();
-const paperMarkTimeframe = supportedTimeframes.has(configuredPaperMarkTimeframe)
-  ? configuredPaperMarkTimeframe
-  : "5m";
+if (!supportedTimeframes.has(configuredPaperMarkTimeframe)) {
+  throw new Error(
+    "PAPER_MARK_TIMEFRAME must be one of: 5m, 15m, 1h, 4h, 1d."
+  );
+}
+const paperMarkTimeframe = configuredPaperMarkTimeframe;
 let paperOrderQueue = Promise.resolve();
 const marketDataProvider = new TradingViewMarketDataProvider({
   token: process.env.TRADINGVIEW_SESSION_ID,
