@@ -197,6 +197,27 @@ describe("trade ledger and paper executor", () => {
     });
   });
 
+  it("migrates legacy daily state files that predate peak equity", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quant-swarm-trades-"));
+    const path = join(dir, "legacy-day.json");
+    await import("node:fs/promises").then(({ writeFile }) =>
+      writeFile(
+        path,
+        JSON.stringify({
+          schemaVersion: 1,
+          utcDate: "2026-09-30",
+          dayStartEquity: 101_000,
+          createdAt: Date.UTC(2026, 8, 30, 0, 0, 0),
+        }) + "\n",
+        "utf8"
+      )
+    );
+
+    const store = new JsonPaperDayStateStore(path);
+    const state = await store.read();
+    expect(state?.peakEquity).toBe(101_000);
+  });
+
   it("uses persisted historical peak for replayed drawdown risk", () => {
     const portfolio = new PaperPortfolio(100_000);
     const riskState = portfolio.toRiskState({}, 100_000, 120_000);
