@@ -38,6 +38,7 @@ describe("research dashboard assets", () => {
     expect(appJs).toContain("timeframe: state.chartTimeframe");
     expect(appJs).toContain("new URLSearchParams({ symbol })");
     expect(appJs).toContain("trade-marker");
+    expect(appJs).toContain("Math.min(trade.timestamp, lastTs)");
     expect(appJs).toContain("purged_embargoed_cv");
     expect(appJs).toContain("CV median Sharpe");
     expect(appJs).toContain("Positive CV folds");
@@ -53,6 +54,7 @@ describe("research dashboard assets", () => {
     expect(serverJs).toContain("PAPER_MARK_TIMEFRAME");
     expect(serverJs).toContain("loadOpenPositionMarks");
     expect(serverJs).toContain("paperMarkTimeframe");
+    expect(serverJs).toContain("PAPER_MARK_TIMEFRAME must be one of");
     expect(serverJs).toContain("PAPER_DAY_STATE_PATH");
     expect(serverJs).toContain("const paperRiskEngine = new RiskEngine");
     expect(serverJs).toContain("new RiskEngine(DEFAULT_RISK_LIMITS, \"paper\")");
