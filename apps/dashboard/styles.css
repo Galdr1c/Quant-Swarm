@@ -202,7 +202,7 @@ h1 em{font-style:normal;color:#ffe57f;-webkit-text-stroke:1px rgba(33,24,63,.5)}
 .trade-marker.live.sell path{fill:#ff8e9c}
 .trade-marker.live path{stroke-width:3}
 .paper-portfolio-strip{
-  display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:10px
+  display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:10px
 }
 .paper-portfolio-strip span{
   min-width:0;padding:8px 9px;border:2px solid rgba(33,24,63,.72);border-radius:12px;
