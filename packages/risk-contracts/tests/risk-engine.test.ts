@@ -141,6 +141,7 @@ describe("RiskEngine", () => {
       makeState({ totalExposurePct: -1 }),
       makeState({ symbolExposures: new Map([["BTCUSDT", Number.NaN]]) }),
       makeState({ symbolExposures: new Map([["BTCUSDT", -1]]) }),
+      makeState({ symbolExposures: undefined as any }),
     ];
 
     for (const state of malformedStates) {
@@ -182,6 +183,18 @@ describe("RiskEngine", () => {
           "shadow"
         )
     ).toThrow(/maxDrawdownPct/);
+    expect(
+      () =>
+        new RiskEngine(
+          {
+            maxPortfolioExposurePct: 50,
+            maxSymbolExposurePct: 10,
+            maxDailyLossPct: 3,
+            maxDrawdownPct: 15,
+          } as any,
+          "shadow"
+        )
+    ).toThrow(/maxLeverage/);
   });
 
   it("limits are frozen and cannot be mutated", () => {
