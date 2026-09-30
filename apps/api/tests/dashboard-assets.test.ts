@@ -36,10 +36,15 @@ describe("research dashboard assets", () => {
     expect(appJs).toContain("/api/portfolio");
     expect(appJs).toContain("/api/paper/order");
     expect(appJs).toContain("trade-marker");
+    expect(appJs).toContain("purged_embargoed_cv");
+    expect(appJs).toContain("CV median Sharpe");
+    expect(appJs).toContain("Positive CV folds");
     expect(html).toContain('id="paper-portfolio-strip"');
     expect(html).toContain('id="paper-order-quantity"');
     expect(html).toContain('id="paper-buy-button"');
     expect(html).toContain('id="paper-sell-button"');
+    expect(html).toContain("Purged CV · PSR · DSR · PBO · FDR · regime robustness");
+    expect(html).toContain("universe holdout median Sharpe");
     expect(serverJs).toContain("/api/paper/order");
     expect(serverJs).toContain("new RiskEngine(DEFAULT_RISK_LIMITS, \"paper\")");
     expect(serverJs).not.toContain("/api/live/order");
