@@ -38,6 +38,7 @@ const paperExecutor = new PaperExecutor(tradeLedger, {
   slippageBps: paperSlippageBps,
   feeBps: paperFeeBps
 });
+const paperRiskEngine = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
 const researchRunnerPath = join(repoRoot, "apps", "api", "dist", "universe.js");
 const supportedMarketTypes = new Set([
   "",
@@ -210,7 +211,6 @@ async function paperOrder(req, res) {
     const currentPortfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
     const currentSnapshot = currentPortfolio.snapshot(marks);
     const dayState = await paperDayState.getOrCreate(currentSnapshot.equity);
-    const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
     const order = {
       symbol,
       side,
@@ -226,7 +226,7 @@ async function paperOrder(req, res) {
     const result = await paperExecutor.executeFromLedger(
       order,
       paperInitialCash,
-      risk,
+      paperRiskEngine,
       marks,
       dayState.dayStartEquity
     );
