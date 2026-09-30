@@ -399,11 +399,34 @@ export class JsonlTradeLedger implements TradeLedger {
     await previous;
 
     try {
-      const existing = (await this.list()).find((row) => row.id === fill.id);
+      const rows = await this.list();
+      const existing = rows.find((row) => row.id === fill.id);
       if (existing) {
         if (canonicalTrade(existing) === canonicalTrade(fill)) return "duplicate";
         throw new Error(`Conflicting trade fill id already exists: ${fill.id}`);
       }
+
+      if (fill.mode === "live" && fill.externalId) {
+        const external = rows.find(
+          (row) =>
+            row.mode === "live" &&
+            row.source === "broker" &&
+            row.externalId === fill.externalId
+        );
+        if (external) {
+          const sameExecution =
+            external.symbol === fill.symbol &&
+            external.side === fill.side &&
+            external.price === fill.price &&
+            external.quantity === fill.quantity &&
+            external.fee === fill.fee;
+          if (sameExecution) return "duplicate";
+          throw new Error(
+            `Conflicting broker externalId already exists: ${fill.externalId}`
+          );
+        }
+      }
+
       await mkdir(dirname(this.filePath), { recursive: true });
       await appendFile(this.filePath, JSON.stringify(fill) + "\n", "utf8");
       return "inserted";
@@ -642,6 +665,18 @@ export function validateTradeFill(value: unknown): asserts value is TradeFill {
   if (fill.source !== "paper-executor" && fill.source !== "broker") {
     throw new Error("Trade fill source is invalid");
   }
+  if (fill.mode === "paper" && fill.source !== "paper-executor") {
+    throw new Error("Paper trade fill source must be paper-executor");
+  }
+  if (fill.mode === "live" && fill.source !== "broker") {
+    throw new Error("Live trade fill source must be broker");
+  }
+  if (
+    fill.externalId !== undefined &&
+    (typeof fill.externalId !== "string" || !fill.externalId.trim())
+  ) {
+    throw new Error("Trade fill externalId must be a non-empty string when provided");
+  }
   if (!Number.isSafeInteger(fill.timestamp) || Number(fill.timestamp) <= 0) {
     throw new Error("Trade fill timestamp must be a positive integer");
   }
@@ -653,6 +688,11 @@ export function validateTradeFill(value: unknown): asserts value is TradeFill {
     if (!Number.isFinite(number) || Number(number) <= 0) {
       throw new Error(`Trade fill ${name} must be positive`);
     }
+  }
+  const expectedNotional = Number(fill.price) * Number(fill.quantity);
+  const notionalTolerance = Math.max(1e-8, Math.abs(expectedNotional) * 1e-8);
+  if (Math.abs(Number(fill.notional) - expectedNotional) > notionalTolerance) {
+    throw new Error("Trade fill notional must equal price × quantity");
   }
   if (!Number.isFinite(fill.fee) || Number(fill.fee) < 0) {
     throw new Error("Trade fill fee must be non-negative");
