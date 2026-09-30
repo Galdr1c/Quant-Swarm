@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
   PortfolioState,
@@ -31,6 +31,80 @@ export interface TradeFill {
 export interface TradeLedger {
   append(fill: TradeFill): Promise<"inserted" | "duplicate">;
   list(symbol?: string): Promise<TradeFill[]>;
+}
+
+export interface PaperDayState {
+  schemaVersion: 1;
+  utcDate: string;
+  dayStartEquity: number;
+  createdAt: number;
+}
+
+export class JsonPaperDayStateStore {
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(private readonly filePath: string) {
+    if (!filePath.trim()) throw new Error("Paper day-state path cannot be empty");
+  }
+
+  async getOrCreate(currentEquity: number, now = Date.now()): Promise<PaperDayState> {
+    if (!Number.isFinite(currentEquity) || currentEquity <= 0) {
+      throw new Error("Paper day-start equity must be positive");
+    }
+    if (!Number.isSafeInteger(now) || now <= 0) {
+      throw new Error("Paper day-state timestamp must be a positive integer");
+    }
+
+    return this.serialized(async () => {
+      const utcDate = new Date(now).toISOString().slice(0, 10);
+      const existing = await this.read();
+      if (existing?.utcDate === utcDate) return existing;
+
+      const next: PaperDayState = {
+        schemaVersion: 1,
+        utcDate,
+        dayStartEquity: currentEquity,
+        createdAt: now,
+      };
+      await mkdir(dirname(this.filePath), { recursive: true });
+      const temporary = this.filePath + "." + randomUUID() + ".tmp";
+      await writeFile(temporary, JSON.stringify(next) + "\n", "utf8");
+      await rename(temporary, this.filePath);
+      return next;
+    });
+  }
+
+  async read(): Promise<PaperDayState | undefined> {
+    let content: string;
+    try {
+      content = await readFile(this.filePath, "utf8");
+    } catch (error: any) {
+      if (error?.code === "ENOENT") return undefined;
+      throw error;
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(content);
+    } catch (error) {
+      throw new Error(`Invalid paper day-state JSON: ${String(error)}`);
+    }
+    validatePaperDayState(value);
+    return value;
+  }
+
+  private async serialized<T>(task: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.queue;
+    this.queue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  }
 }
 
 export interface PaperPositionSnapshot {
@@ -310,6 +384,7 @@ export interface PaperExecutionResult {
 
 export class PaperExecutor {
   private readonly slippageBps: number;
+  private executionQueue: Promise<void> = Promise.resolve();
   private readonly feeBps: number;
   private readonly now: () => number;
   private readonly idFactory: () => string;
@@ -342,6 +417,25 @@ export class PaperExecutor {
     return { risk, fill };
   }
 
+  async executeFromLedger(
+    order: ProposedOrder,
+    initialCash: number,
+    riskEngine: RiskEngine,
+    marks: Readonly<Record<string, number>> = {},
+    dayStartEquity?: number
+  ): Promise<PaperExecutionResult> {
+    return this.serializedExecution(async () => {
+      const portfolio = await rebuildPaperPortfolio(this.ledger, initialCash);
+      return this.executeAgainstPortfolio(
+        order,
+        portfolio,
+        riskEngine,
+        marks,
+        dayStartEquity
+      );
+    });
+  }
+
   async executeAgainstPortfolio(
     order: ProposedOrder,
     portfolio: PaperPortfolio,
@@ -366,6 +460,20 @@ export class PaperExecutor {
     await this.ledger.append(fill);
     portfolio.applyFill(fill);
     return { risk, fill, portfolio: portfolio.snapshot(marks) };
+  }
+
+  private async serializedExecution<T>(task: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.executionQueue;
+    this.executionQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+    }
   }
 
   private executionPrice(order: ProposedOrder): number {
@@ -404,6 +512,21 @@ export function brokerFill(input: Omit<TradeFill, "schemaVersion" | "mode" | "so
   };
   validateTradeFill(fill);
   return fill;
+}
+
+export function validatePaperDayState(value: unknown): asserts value is PaperDayState {
+  if (!value || typeof value !== "object") throw new Error("Paper day state must be an object");
+  const state = value as Partial<PaperDayState>;
+  if (state.schemaVersion !== 1) throw new Error("Unsupported paper day-state schemaVersion");
+  if (typeof state.utcDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(state.utcDate)) {
+    throw new Error("Paper day-state utcDate must use YYYY-MM-DD");
+  }
+  if (!Number.isFinite(state.dayStartEquity) || Number(state.dayStartEquity) <= 0) {
+    throw new Error("Paper day-state dayStartEquity must be positive");
+  }
+  if (!Number.isSafeInteger(state.createdAt) || Number(state.createdAt) <= 0) {
+    throw new Error("Paper day-state createdAt must be a positive integer");
+  }
 }
 
 export function validateTradeFill(value: unknown): asserts value is TradeFill {
