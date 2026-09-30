@@ -263,7 +263,7 @@ describe("trade ledger and paper executor", () => {
       risk,
       { "NASDAQ:AAPL": 200 },
       100_000,
-      117_000
+      117_300
     );
 
     expect(result.risk).toEqual({ approved: false, reason: "MAX_DRAWDOWN" });
