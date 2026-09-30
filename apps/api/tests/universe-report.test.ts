@@ -30,6 +30,13 @@ function completed(
       totalTrades: 10,
       winRate: 55,
     },
+    purgedCv: {
+      evaluatedFolds: 5,
+      positiveSharpeFraction: 0.8,
+      medianSharpe: sharpe - 0.1,
+      meanNetReturn: netReturn / 2,
+      worstMaxDrawdown: 9,
+    },
     finalHoldout: {
       netReturn,
       annualReturn: netReturn,
@@ -88,6 +95,12 @@ describe("universe research report", () => {
       generatedAt: "2026-09-22T00:00:00.000Z",
       source: "tradingview",
       summary: { assets: 1, pass: 1 },
+      results: [{
+        purgedCv: {
+          evaluatedFolds: 5,
+          positiveSharpeFraction: 0.8,
+        },
+      }],
     });
   });
 
