@@ -476,7 +476,7 @@ async function placePaperOrder(side) {
         symbol,
         side,
         quantity,
-        price,
+        timeframe: state.chartTimeframe,
         strategyId: "dashboard-paper",
         reduceOnly: side === "SELL",
       }),
