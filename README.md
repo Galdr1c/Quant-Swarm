@@ -31,7 +31,7 @@ A paper-only execution endpoint is available at `POST /api/paper/order`. It acce
 
 Malformed/non-finite risk state and invalid risk-limit configuration are rejected fail-closed by the sovereign `RiskEngine`; zero leverage and invalid identifiers are rejected as invalid orders.
 
-Daily-loss checks use a UTC-day session baseline persisted at `PAPER_DAY_STATE_PATH` (default `.data/paper-day-state.json`) instead of treating lifetime PnL as daily PnL. Historical peak equity is persisted alongside that baseline so replaying the fill ledger or restarting the dashboard cannot silently reset drawdown. The paper risk gate uses a sticky file-backed kill switch at `PAPER_KILL_SWITCH_PATH` (default `.data/paper-kill-switch.json`). Once activated it survives dashboard restarts and there is no HTTP deactivate endpoint; clearing it is an explicit operator action after reviewing the risk condition.
+Daily-loss checks use the first server-marked equity observed in each UTC day as the session baseline, persisted at `PAPER_DAY_STATE_PATH` (default `.data/paper-day-state.json`), instead of treating lifetime PnL as daily PnL. This is an observation-time baseline, not a synthetic reconstruction of exact 00:00 UTC equity when the dashboard was offline. Historical peak equity is persisted alongside that baseline so replaying the fill ledger or restarting the dashboard cannot silently reset drawdown. The paper risk gate uses a sticky file-backed kill switch at `PAPER_KILL_SWITCH_PATH` (default `.data/paper-kill-switch.json`). Once activated it survives dashboard restarts and there is no HTTP deactivate endpoint; clearing it is an explicit operator action after reviewing the risk condition.
 
 ### Holdout integrity
 
