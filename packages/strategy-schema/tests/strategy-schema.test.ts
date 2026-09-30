@@ -101,6 +101,37 @@ describe("Strategy Schema Validation", () => {
     expect(result.errors.some((e: string) => e.includes("duplicated"))).toBe(true);
   });
 
+  it("validates explicit MACD, BBANDS and VWAP semantics", () => {
+    const good = {
+      ...validStrategy,
+      indicators: [
+        { id: "macd", type: "MACD", params: { component: "signal" } },
+        { id: "bb", type: "BBANDS", params: { component: "upper" } },
+        { id: "vwap", type: "VWAP", params: { source: "hlc3", reset: "utc_day" } },
+      ],
+      entry: { operator: "AND", rules: [{ left: "macd", operator: ">", right: "vwap" }] },
+      exit: { operator: "OR", rules: [{ left: "bb", operator: "<", right: "vwap" }] },
+    };
+    expect(validateStrategy(good).valid).toBe(true);
+
+    for (const [type, params, fragment] of [
+      ["MACD", { component: "upper" }, "MACD component"],
+      ["BBANDS", { component: "histogram" }, "BBANDS component"],
+      ["VWAP", { source: "median" }, "VWAP source"],
+      ["VWAP", { reset: "session" }, "VWAP reset"],
+    ] as const) {
+      const bad = {
+        ...validStrategy,
+        indicators: [{ id: "x", type, params }],
+        entry: { operator: "AND", rules: [{ left: "x", operator: ">", right: 0 }] },
+        exit: { operator: "OR", rules: [{ left: "x", operator: "<", right: 0 }] },
+      };
+      const result = validateStrategy(bad);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e: string) => e.includes(fragment))).toBe(true);
+    }
+  });
+
   it("rejects invalid indicator lengths and MACD ordering", () => {
     const badLength = {
       ...validStrategy,
