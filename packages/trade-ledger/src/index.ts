@@ -542,7 +542,7 @@ export class PaperExecutor {
     });
   }
 
-  async executeAgainstPortfolio(
+  private async executeAgainstPortfolio(
     order: ProposedOrder,
     portfolio: PaperPortfolio,
     riskEngine: RiskEngine,
