@@ -516,11 +516,14 @@ async function loadPaperPortfolio(symbol, price) {
     $("paper-cash").textContent = formatNumber(portfolio.cash, 2);
     $("paper-realized").textContent = signedNumber(portfolio.realizedPnl, 2);
     $("paper-unrealized").textContent = signedNumber(portfolio.unrealizedPnl, 2);
+    $("paper-daily").textContent =
+      signedNumber(portfolio.dailyPnl, 2) + " (" +
+      signedNumber(portfolio.dailyPnlPct, 2) + "%)";
     $("paper-positions").textContent = String(
       Array.isArray(portfolio.positions) ? portfolio.positions.length : 0
     );
   } catch {
-    ["paper-equity", "paper-cash", "paper-realized", "paper-unrealized", "paper-positions"]
+    ["paper-equity", "paper-cash", "paper-realized", "paper-unrealized", "paper-daily", "paper-positions"]
       .forEach((id) => {
         const node = $(id);
         if (node) node.textContent = "—";
