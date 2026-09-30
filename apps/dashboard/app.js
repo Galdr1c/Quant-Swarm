@@ -564,8 +564,7 @@ function drawPriceChart(candles, trades) {
     .filter((trade) =>
       Number.isFinite(trade.timestamp) &&
       Number.isFinite(trade.price) &&
-      trade.timestamp >= firstTs &&
-      trade.timestamp <= lastTs
+      trade.timestamp >= firstTs
     );
 
   const priceValues = rows.map((row) => row.close).concat(visibleTrades.map((trade) => trade.price));
@@ -585,7 +584,11 @@ function drawPriceChart(candles, trades) {
   area.setAttribute("d", path + " L " + width + " " + bottom + " L 0 " + bottom + " Z");
 
   visibleTrades.forEach((trade) => {
-    const x = xFor(trade.timestamp);
+    // A fill can occur after the timestamp of the latest *closed* candle.
+    // Keep its real ledger timestamp, but project it onto the chart's right
+    // edge until the next closed candle arrives so the marker is visible now.
+    const plottedTimestamp = Math.min(trade.timestamp, lastTs);
+    const x = xFor(plottedTimestamp);
     const y = yFor(trade.price);
     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
     group.setAttribute(
