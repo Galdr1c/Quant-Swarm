@@ -11,6 +11,7 @@ import {
 } from "../../packages/market-data/dist/tradingview.js";
 import {
   JsonlTradeLedger,
+  JsonPaperDayStateStore,
   PaperExecutor,
   rebuildPaperPortfolio
 } from "../../packages/trade-ledger/dist/index.js";
@@ -29,6 +30,14 @@ const tradeLedger = new JsonlTradeLedger(tradesPath);
 const paperInitialCash = positiveNumber(process.env.PAPER_INITIAL_CASH, 100_000);
 const paperSlippageBps = nonNegativeNumber(process.env.PAPER_SLIPPAGE_BPS, 2);
 const paperFeeBps = nonNegativeNumber(process.env.PAPER_FEE_BPS, 5);
+const paperDayStatePath = resolve(
+  process.env.PAPER_DAY_STATE_PATH ?? ".data/paper-day-state.json"
+);
+const paperDayState = new JsonPaperDayStateStore(paperDayStatePath);
+const paperExecutor = new PaperExecutor(tradeLedger, {
+  slippageBps: paperSlippageBps,
+  feeBps: paperFeeBps
+});
 const researchRunnerPath = join(repoRoot, "apps", "api", "dist", "universe.js");
 const supportedMarketTypes = new Set([
   "",
@@ -197,12 +206,11 @@ async function paperOrder(req, res) {
   }
 
   try {
-    const portfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
+    const marks = { [symbol]: price };
+    const currentPortfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
+    const currentSnapshot = currentPortfolio.snapshot(marks);
+    const dayState = await paperDayState.getOrCreate(currentSnapshot.equity);
     const risk = new RiskEngine(DEFAULT_RISK_LIMITS, "paper");
-    const executor = new PaperExecutor(tradeLedger, {
-      slippageBps: paperSlippageBps,
-      feeBps: paperFeeBps
-    });
     const order = {
       symbol,
       side,
@@ -215,26 +223,38 @@ async function paperOrder(req, res) {
           ? payload.reduceOnly
           : side === "SELL"
     };
-    const result = await executor.executeAgainstPortfolio(
+    const result = await paperExecutor.executeFromLedger(
       order,
-      portfolio,
+      paperInitialCash,
       risk,
-      { [symbol]: price },
-      paperInitialCash
+      marks,
+      dayState.dayStartEquity
     );
+
+    const portfolio = result.portfolio;
+    const dailyPnl = portfolio
+      ? portfolio.equity - dayState.dayStartEquity
+      : currentSnapshot.equity - dayState.dayStartEquity;
+    const dailyPnlPct = (dailyPnl / dayState.dayStartEquity) * 100;
 
     if (!result.risk.approved) {
       return sendJson(res, 409, {
         error: "Paper order rejected by risk engine.",
         risk: result.risk,
-        portfolio: result.portfolio
+        portfolio,
+        dayState,
+        dailyPnl,
+        dailyPnlPct
       });
     }
 
     return sendJson(res, 201, {
       fill: result.fill,
       risk: result.risk,
-      portfolio: result.portfolio
+      portfolio,
+      dayState,
+      dailyPnl,
+      dailyPnlPct
     });
   } catch (error) {
     return sendJson(res, 400, {
@@ -254,9 +274,19 @@ async function paperPortfolio(url, res) {
   try {
     const portfolio = await rebuildPaperPortfolio(tradeLedger, paperInitialCash);
     const snapshot = portfolio.snapshot(marks);
+    const storedDayState = await paperDayState.read();
+    const today = new Date().toISOString().slice(0, 10);
+    const dayStartEquity =
+      storedDayState?.utcDate === today
+        ? storedDayState.dayStartEquity
+        : snapshot.equity;
+    const dailyPnl = snapshot.equity - dayStartEquity;
     return sendJson(res, 200, {
       ...snapshot,
       positions: snapshot.positions,
+      dayStartEquity,
+      dailyPnl,
+      dailyPnlPct: dayStartEquity > 0 ? (dailyPnl / dayStartEquity) * 100 : 0,
       markSymbol: symbol,
       markPrice: symbol ? marks[symbol] ?? null : null
     });
