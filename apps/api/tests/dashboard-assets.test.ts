@@ -35,6 +35,7 @@ describe("research dashboard assets", () => {
     expect(appJs).toContain("/api/trades");
     expect(appJs).toContain("/api/portfolio");
     expect(appJs).toContain("/api/paper/order");
+    expect(appJs).toContain("timeframe: state.chartTimeframe");
     expect(appJs).toContain("trade-marker");
     expect(appJs).toContain("purged_embargoed_cv");
     expect(appJs).toContain("CV median Sharpe");
@@ -44,9 +45,11 @@ describe("research dashboard assets", () => {
     expect(html).toContain('id="paper-buy-button"');
     expect(html).toContain('id="paper-sell-button"');
     expect(html).toContain('id="paper-daily"');
+    expect(html).toContain("Server-verifies latest closed TradingView price");
     expect(html).toContain("Purged CV · PSR · DSR · PBO · FDR · regime robustness");
     expect(html).toContain("universe holdout median Sharpe");
     expect(serverJs).toContain("/api/paper/order");
+    expect(serverJs).toContain("getHistoricalOHLCV(symbol, timeframe, 50)");
     expect(serverJs).toContain("PAPER_DAY_STATE_PATH");
     expect(serverJs).toContain("const paperRiskEngine = new RiskEngine");
     expect(serverJs).toContain("new RiskEngine(DEFAULT_RISK_LIMITS, \"paper\")");
