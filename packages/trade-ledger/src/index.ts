@@ -37,6 +37,7 @@ export interface PaperDayState {
   schemaVersion: 1;
   utcDate: string;
   dayStartEquity: number;
+  peakEquity: number;
   createdAt: number;
 }
 
@@ -58,18 +59,24 @@ export class JsonPaperDayStateStore {
     return this.serialized(async () => {
       const utcDate = new Date(now).toISOString().slice(0, 10);
       const existing = await this.read();
-      if (existing?.utcDate === utcDate) return existing;
+      if (existing?.utcDate === utcDate) {
+        if (currentEquity <= existing.peakEquity) return existing;
+        const updated: PaperDayState = {
+          ...existing,
+          peakEquity: currentEquity,
+        };
+        await this.write(updated);
+        return updated;
+      }
 
       const next: PaperDayState = {
         schemaVersion: 1,
         utcDate,
         dayStartEquity: currentEquity,
+        peakEquity: Math.max(existing?.peakEquity ?? currentEquity, currentEquity),
         createdAt: now,
       };
-      await mkdir(dirname(this.filePath), { recursive: true });
-      const temporary = this.filePath + "." + randomUUID() + ".tmp";
-      await writeFile(temporary, JSON.stringify(next) + "\n", "utf8");
-      await rename(temporary, this.filePath);
+      await this.write(next);
       return next;
     });
   }
@@ -90,6 +97,14 @@ export class JsonPaperDayStateStore {
     }
     validatePaperDayState(value);
     return value;
+  }
+
+  private async write(value: PaperDayState): Promise<void> {
+    validatePaperDayState(value);
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const temporary = this.filePath + "." + randomUUID() + ".tmp";
+    await writeFile(temporary, JSON.stringify(value) + "\n", "utf8");
+    await rename(temporary, this.filePath);
   }
 
   private async serialized<T>(task: () => Promise<T>): Promise<T> {
@@ -214,7 +229,10 @@ export class PaperPortfolio {
     );
   }
 
-  snapshot(marks: Readonly<Record<string, number>> = {}): PaperPortfolioSnapshot {
+  snapshot(
+    marks: Readonly<Record<string, number>> = {},
+    historicalPeakEquity?: number
+  ): PaperPortfolioSnapshot {
     const positions: PaperPositionSnapshot[] = [];
     let grossExposure = 0;
     let unrealizedPnl = 0;
@@ -247,7 +265,11 @@ export class PaperPortfolio {
       (sum, position) => sum + position.marketValue,
       0
     );
-    this.peakEquityValue = Math.max(this.peakEquityValue, equity);
+    this.peakEquityValue = Math.max(
+      this.peakEquityValue,
+      Number.isFinite(historicalPeakEquity) ? Number(historicalPeakEquity) : 0,
+      equity
+    );
     const drawdownPct = this.peakEquityValue > 0
       ? ((this.peakEquityValue - equity) / this.peakEquityValue) * 100
       : 0;
@@ -271,9 +293,10 @@ export class PaperPortfolio {
 
   toRiskState(
     marks: Readonly<Record<string, number>> = {},
-    dayStartEquity?: number
+    dayStartEquity?: number,
+    historicalPeakEquity?: number
   ): PortfolioState {
-    const snapshot = this.snapshot(marks);
+    const snapshot = this.snapshot(marks, historicalPeakEquity);
     const baseline =
       dayStartEquity !== undefined && Number.isFinite(dayStartEquity) && dayStartEquity > 0
         ? dayStartEquity
@@ -422,7 +445,8 @@ export class PaperExecutor {
     initialCash: number,
     riskEngine: RiskEngine,
     marks: Readonly<Record<string, number>> = {},
-    dayStartEquity?: number
+    dayStartEquity?: number,
+    historicalPeakEquity?: number
   ): Promise<PaperExecutionResult> {
     return this.serializedExecution(async () => {
       const portfolio = await rebuildPaperPortfolio(this.ledger, initialCash);
@@ -431,7 +455,8 @@ export class PaperExecutor {
         portfolio,
         riskEngine,
         marks,
-        dayStartEquity
+        dayStartEquity,
+        historicalPeakEquity
       );
     });
   }
@@ -441,16 +466,26 @@ export class PaperExecutor {
     portfolio: PaperPortfolio,
     riskEngine: RiskEngine,
     marks: Readonly<Record<string, number>> = {},
-    dayStartEquity?: number
+    dayStartEquity?: number,
+    historicalPeakEquity?: number
   ): Promise<PaperExecutionResult> {
     if (riskEngine.getMode() !== "paper") {
       throw new Error("PaperExecutor requires RiskEngine mode=paper");
     }
 
-    const state = portfolio.toRiskState(marks, dayStartEquity);
+    const state = portfolio.toRiskState(
+      marks,
+      dayStartEquity,
+      historicalPeakEquity
+    );
     const executionPrice = this.executionPrice(order);
     const risk = riskEngine.evaluateOrder({ ...order, price: executionPrice }, state);
-    if (!risk.approved) return { risk, portfolio: portfolio.snapshot(marks) };
+    if (!risk.approved) {
+      return {
+        risk,
+        portfolio: portfolio.snapshot(marks, historicalPeakEquity),
+      };
+    }
 
     const fill = this.buildFill(order, executionPrice);
 
@@ -459,7 +494,11 @@ export class PaperExecutor {
     portfolio.assertCanApply(fill);
     await this.ledger.append(fill);
     portfolio.applyFill(fill);
-    return { risk, fill, portfolio: portfolio.snapshot(marks) };
+    return {
+      risk,
+      fill,
+      portfolio: portfolio.snapshot(marks, historicalPeakEquity),
+    };
   }
 
   private async serializedExecution<T>(task: () => Promise<T>): Promise<T> {
@@ -523,6 +562,12 @@ export function validatePaperDayState(value: unknown): asserts value is PaperDay
   }
   if (!Number.isFinite(state.dayStartEquity) || Number(state.dayStartEquity) <= 0) {
     throw new Error("Paper day-state dayStartEquity must be positive");
+  }
+  if (
+    !Number.isFinite(state.peakEquity) ||
+    Number(state.peakEquity) < Number(state.dayStartEquity)
+  ) {
+    throw new Error("Paper day-state peakEquity must be >= dayStartEquity");
   }
   if (!Number.isSafeInteger(state.createdAt) || Number(state.createdAt) <= 0) {
     throw new Error("Paper day-state createdAt must be a positive integer");
